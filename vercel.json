@@ -1,20 +1,36 @@
 {
-  "version": 2,
-  "installCommand": "npm install",
-  "buildCommand": "npm run vercel-build",
-  "outputDirectory": "apps/web/dist",
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "api": {
+      "root": "apps/api",
+      "framework": "express",
+      "entrypoint": "src/app.ts",
+      "buildCommand": "npm run build && npm run db:deploy"
+    },
+    "web": {
+      "root": "apps/web",
+      "framework": "vite",
+      "buildCommand": "npm run build"
+    }
+  },
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "/api/index"
+      "destination": {
+        "service": "api"
+      }
     },
     {
       "source": "/health",
-      "destination": "/api/index"
+      "destination": {
+        "service": "api"
+      }
     },
     {
       "source": "/(.*)",
-      "destination": "/index.html"
+      "destination": {
+        "service": "web"
+      }
     }
   ]
 }

@@ -12,6 +12,7 @@ import { webhooksRouter } from "./routes/webhooks.js";
 import { errorHandler, notFound } from "./middleware/errors.js";
 
 export const app = express();
+export default app;
 
 app.disable("x-powered-by");
 app.use(helmet());
@@ -58,4 +59,3 @@ app.use(
 
 app.use(notFound);
 app.use(errorHandler);
-

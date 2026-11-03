@@ -12,7 +12,6 @@
     "dev:api": "npm --workspace @eventflow/api run dev",
     "dev:web": "npm --workspace @eventflow/web run dev",
     "build": "npm run build --workspace @eventflow/api && npm run build --workspace @eventflow/web",
-    "vercel-build": "npm run db:generate && npm run build --workspace @eventflow/web",
     "test": "npm run test --workspace @eventflow/api",
     "typecheck": "npm run typecheck --workspace @eventflow/api && npm run typecheck --workspace @eventflow/web",
     "db:generate": "npm --workspace @eventflow/api run db:generate",

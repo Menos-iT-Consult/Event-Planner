@@ -121,16 +121,16 @@ export function EventWorkspace({ user }: { user: User }) {
         {visibleTabs.map(([key, label]) => <button key={key} className={`side-link side-button ${tab === key ? "active" : ""}`} onClick={() => setTab(key)}><span>{iconForTab(key)}</span>{label}</button>)}
         <div className="sidebar-bottom">
           <div className="user-chip"><span className="avatar">{user.name.slice(0, 1).toUpperCase()}</span><span><strong>{user.name}</strong><small>{user.role.replaceAll("_", " ").toLowerCase()}</small></span></div>
-          <Link className="text-button" to={`/e/${event.slug}`} target="_blank" rel="noreferrer">View public page ↗</Link>
+          <Link className="text-button" to={`/e/${event.slug}`} target="_blank" rel="noreferrer">View public page</Link>
         </div>
       </aside>
       <section className="main-content">
-        <header className="topbar"><span className="breadcrumb"><Link to="/dashboard">Workspace</Link> <span>/</span> {event.title}</span><Link className="topbar-link" to={`/scanner/${event.id}`}>Open gate scanner ↗</Link></header>
+        <header className="topbar"><span className="breadcrumb"><Link to="/dashboard">Workspace</Link> <span>/</span> {event.title}</span><Link className="topbar-link" to={`/scanner/${event.id}`}>Open gate scanner</Link></header>
         {error && <div className="alert alert-error" role="alert">{error}</div>}
         <div className="event-workspace-heading">
-          <div className={`event-cover-mark ${event.type.toLowerCase()}`}>{event.type === "WEDDING" ? "✿" : event.type === "VOTING" ? "✳" : "◈"}</div>
-          <div className="event-heading-copy"><div className="eyebrow">{event.type.replace("_", " ")} · YOUR EVENT</div><h1>{event.title}</h1><p>⌖ &nbsp;{event.location} <span className="heading-divider">·</span> ◷ &nbsp;{formatDate(event.startDate)}{event.startDate !== event.endDate ? ` — ${formatDate(event.endDate)}` : ""}</p></div>
-          <a className="button button-outline" href={`/e/${event.slug}`} target="_blank" rel="noreferrer">Public page ↗</a>
+          <div className={`event-cover-mark ${event.type.toLowerCase()}`}>{event.type}</div>
+          <div className="event-heading-copy"><div className="eyebrow">{event.type.replace("_", " ")} · YOUR EVENT</div><h1>{event.title}</h1><p>{event.location} <span className="heading-divider">·</span> {formatDate(event.startDate)}{event.startDate !== event.endDate ? ` — ${formatDate(event.endDate)}` : ""}</p></div>
+          <a className="button button-outline" href={`/e/${event.slug}`} target="_blank" rel="noreferrer">Public page</a>
         </div>
         <nav className="workspace-tabs" aria-label="Event sections">{visibleTabs.map(([key, label]) => <button key={key} className={tab === key ? "selected" : ""} onClick={() => setTab(key)}>{label}</button>)}</nav>
         {tab === "overview" && <Overview event={event} data={data} onSelect={setTab} />}
@@ -147,7 +147,7 @@ export function EventWorkspace({ user }: { user: User }) {
 }
 
 function iconForTab(tab: string): string {
-  return ({ overview: "◈", guests: "♧", programme: "◷", tickets: "▤", engage: "✳", wedding: "♡", updates: "↗" } as Record<string, string>)[tab] ?? "·";
+  return ({ overview: "01", guests: "02", programme: "03", tickets: "04", engage: "05", wedding: "06", updates: "07" } as Record<string, string>)[tab] ?? "00";
 }
 
 function Overview({ event, data, onSelect }: { event: EventData; data: WorkspaceData; onSelect: (tab: string) => void }) {
@@ -162,8 +162,8 @@ function Overview({ event, data, onSelect }: { event: EventData; data: Workspace
       </div>
       <div className="two-column-panels">
         <section className="content-card"><div className="section-heading compact"><div><div className="eyebrow">KEEP THINGS MOVING</div><h2>Quick links</h2></div></div><div className="quick-links">
-          <button onClick={() => onSelect("guests")}><span className="quick-icon sage">♧</span><span><strong>Invite your people</strong><small>Build your guest list</small></span><b>↗</b></button>
-          <button onClick={() => onSelect(event.type === "VOTING" ? "engage" : "programme")}><span className="quick-icon peach">✳</span><span><strong>{event.type === "VOTING" ? "Set up the contest" : "Plan the programme"}</strong><small>Bring the details together</small></span><b>↗</b></button>
+          <button onClick={() => onSelect("guests")}><span className="quick-icon sage"></span><span><strong>Invite your people</strong><small>Build your guest list</small></span><b>↗</b></button>
+          <button onClick={() => onSelect(event.type === "VOTING" ? "engage" : "programme")}><span className="quick-icon peach"></span><span><strong>{event.type === "VOTING" ? "Set up the contest" : "Plan the programme"}</strong><small>Bring the details together</small></span><b>↗</b></button>
           <button onClick={() => onSelect("tickets")}><span className="quick-icon cream">▤</span><span><strong>Set up ticketing</strong><small>Make passes easy to find</small></span><b>↗</b></button>
         </div></section>
         <section className="content-card"><div className="eyebrow">ON THE CALENDAR</div><h2>The when & where</h2><div className="detail-list"><div><span>Starts</span><strong>{formatDate(event.startDate)}</strong></div><div><span>Ends</span><strong>{formatDate(event.endDate)}</strong></div><div><span>Location</span><strong>{event.location}</strong></div><div><span>Public page</span><a href={`/e/${event.slug}`} target="_blank" rel="noreferrer">eventflow / {event.slug} ↗</a></div></div></section>

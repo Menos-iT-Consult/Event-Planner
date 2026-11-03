@@ -89,5 +89,27 @@ export function Scanner() {
     };
   }, [eventId]);
 
-  return <main className="scanner-shell"><nav className="public-nav"><Link className="brand" to="/dashboard"><span className="brand-mark">e</span> eventflow</Link><Link className="button button-outline" to={`/events/${eventId}`}>Event workspace</Link></nav><section className="scanner-card"><div className="eyebrow">EVENT STAFF · GATE CHECK-IN</div><h1>Welcome them in.</h1><p className="muted">Point the camera at a guest or ticket pass QR code.</p><div id="eventflow-qr-scanner" className={`camera-frame ${cameraStarted ? "camera-ready" : ""}`} /><div className="camera-hint">{cameraError || (cameraStarted ? "Camera is ready · QR pass scans automatically" : "Starting camera...")}</div><div className="scanner-divider"><span>OR ENTER A PASS LINK</span></div><form className="scanner-manual" onSubmit={(event) => { event.preventDefault(); void checkIn(token); }}><input value={token} onChange={(event) => setToken(event.target.value)} placeholder="Paste a pass code or URL" aria-label="Pass code or URL" /><button className="button button-dark" disabled={busy || !token.trim()}>{busy ? "Checking..." : "Check in"}</button></form>{error && <div className="alert alert-error" role="alert">{error}</div>}{result && <div className="scan-success"><span>✓</span><strong>{result}</strong><small>Ready for the next arrival.</small></div>}</section><footer className="public-event-footer"><span>EventFlow gate scanner</span><span>One scan. One welcome.</span></footer></main>;
+  return (
+    <main className="scanner-shell">
+      <nav className="public-nav">
+        <Link className="brand" to="/dashboard"><span className="brand-mark">e</span> eventflow</Link>
+        <Link className="button button-outline" to={`/events/${eventId}`}>Event workspace</Link>
+      </nav>
+      <section className="scanner-card">
+        <div className="eyebrow">EVENT STAFF · GATE CHECK-IN</div>
+        <h1>Welcome them in.</h1>
+        <p className="muted">Point the camera at a guest or ticket pass QR code.</p>
+        <div id="eventflow-qr-scanner" className={`camera-frame ${cameraStarted ? "camera-ready" : ""}`} />
+        <div className="camera-hint">{cameraError || (cameraStarted ? "Camera is ready · QR pass scans automatically" : "Starting camera...")}</div>
+        <div className="scanner-divider"><span>OR ENTER A PASS LINK</span></div>
+        <form className="scanner-manual" onSubmit={(event) => { event.preventDefault(); void checkIn(token); }}>
+          <input value={token} onChange={(event) => setToken(event.target.value)} placeholder="Paste a pass code or URL" aria-label="Pass code or URL" />
+          <button className="button button-dark" disabled={busy || !token.trim()}>{busy ? "Checking..." : "Check in"}</button>
+        </form>
+        {error && <div className="alert alert-error" role="alert">{error}</div>}
+        {result && <div className="scan-success"><strong>{result}</strong><small>Ready for the next arrival.</small></div>}
+      </section>
+      <footer className="public-event-footer"><span>EventFlow gate scanner</span><span>One scan. One welcome.</span></footer>
+    </main>
+  );
 }

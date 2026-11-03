@@ -60,25 +60,25 @@ export function Dashboard({ user, onLogout }: { user: User; onLogout: () => void
       <aside className="sidebar">
         <Link className="brand" to="/dashboard"><span className="brand-mark">e</span> eventflow</Link>
         <div className="side-label">WORKSPACE</div>
-        <Link className="side-link active" to="/dashboard"><span>▦</span> Overview</Link>
+        <Link className="side-link active" to="/dashboard"><span>01</span> Overview</Link>
         <div className="side-label side-spaced">YOUR EVENTS</div>
         {events.slice(0, 5).map((event) => <Link className="side-link side-event" key={event.id} to={user.role === "CHECK_IN_STAFF" ? `/scanner/${event.id}` : `/events/${event.id}`}><span className={`event-dot ${event.type.toLowerCase()}`} />{event.title}</Link>)}
-        <button className="side-add" onClick={() => setShowCreate(true)} disabled={user.role === "CHECK_IN_STAFF"}>＋ Create an event</button>
+        <button className="side-add" onClick={() => setShowCreate(true)} disabled={user.role === "CHECK_IN_STAFF"}>Create an event</button>
         <div className="sidebar-bottom">
           <div className="user-chip"><span className="avatar">{user.name.slice(0, 1).toUpperCase()}</span><span><strong>{user.name}</strong><small>{user.role.replaceAll("_", " ").toLowerCase()}</small></span></div>
-          <button className="text-button" onClick={() => void logout()}>Sign out ↗</button>
+          <button className="text-button" onClick={() => void logout()}>Sign out</button>
         </div>
       </aside>
       <section className="main-content">
         <header className="topbar"><span className="breadcrumb">Workspace <span>/</span> Overview</span><span className="today-label">{new Intl.DateTimeFormat(undefined, { dateStyle: "full" }).format(new Date())}</span></header>
         <div className="page-heading">
-          <div><div className="eyebrow">YOUR SPACE, ALL IN ONE PLACE</div><h1>Good morning, {user.name.split(" ")[0]} <span className="heading-spark">✳</span></h1><p>Here’s what’s happening across your events.</p></div>
-          <div className="heading-actions">{user.role === "ADMIN" && <button className="button button-outline" onClick={() => setShowAdmin(true)}>⚙ Platform</button>}{user.role !== "CHECK_IN_STAFF" && <button className="button button-dark" onClick={() => setShowCreate(true)}>＋ New event</button>}</div>
+          <div><div className="eyebrow">YOUR SPACE, ALL IN ONE PLACE</div><h1>Good morning, {user.name.split(" ")[0]}</h1><p>Here’s what’s happening across your events.</p></div>
+          <div className="heading-actions">{user.role === "ADMIN" && <button className="button button-outline" onClick={() => setShowAdmin(true)}>Platform</button>}{user.role !== "CHECK_IN_STAFF" && <button className="button button-dark" onClick={() => setShowCreate(true)}>New event</button>}</div>
         </div>
         <div className="stat-grid">
-          <div className="stat-card"><span className="stat-icon sage">◈</span><span className="stat-label">Total events</span><strong>{loading ? "—" : eventCount.toString().padStart(2, "0")}</strong><small>Your moments, in motion</small></div>
-          <div className="stat-card"><span className="stat-icon peach">◷</span><span className="stat-label">Coming up</span><strong>{loading ? "—" : upcoming.toString().padStart(2, "0")}</strong><small>On the near horizon</small></div>
-          <div className="stat-card stat-highlight"><span className="stat-icon cream">✳</span><span className="stat-label">A little reminder</span><strong>Make it<br />meaningful.</strong><small>We’ll help with the rest.</small></div>
+          <div className="stat-card"><span className="stat-icon sage">01</span><span className="stat-label">Total events</span><strong>{loading ? "—" : eventCount.toString().padStart(2, "0")}</strong><small>Your moments, in motion</small></div>
+          <div className="stat-card"><span className="stat-icon peach">02</span><span className="stat-label">Coming up</span><strong>{loading ? "—" : upcoming.toString().padStart(2, "0")}</strong><small>On the near horizon</small></div>
+          <div className="stat-card stat-highlight"><span className="stat-icon cream">03</span><span className="stat-label">A little reminder</span><strong>Make it<br />meaningful.</strong><small>We’ll help with the rest.</small></div>
         </div>
         <div className="section-heading"><div><div className="eyebrow">THE BIG PICTURE</div><h2>Your events</h2></div><span className="item-count">{eventCount} {eventCount === 1 ? "event" : "events"}</span></div>
         {error && <div className="alert alert-error" role="alert">{error}</div>}
@@ -86,10 +86,10 @@ export function Dashboard({ user, onLogout }: { user: User; onLogout: () => void
           <div className="event-grid">
             {events.map((event) => (
               <article className="event-card" key={event.id}>
-                <div className={`event-card-art ${event.type.toLowerCase()}`}><span className="event-card-type">{eventLabels[event.type]}</span><span className="event-art-symbol">{event.type === "WEDDING" ? "✿" : event.type === "VOTING" ? "✳" : "◈"}</span><span className="event-art-index">EVENTFLOW / {event.type.slice(0, 3)}</span></div>
+                <div className={`event-card-art ${event.type.toLowerCase()}`}><span className="event-card-type">{eventLabels[event.type]}</span><span className="event-art-symbol">{event.type}</span><span className="event-art-index">EVENTFLOW / {event.type.slice(0, 3)}</span></div>
                 <div className="event-card-body">
-                  <div className="event-card-title"><h3>{event.title}</h3><span aria-hidden="true">↗</span></div>
-                  <div className="event-meta"><span>◷ &nbsp;{formatDate(event.startDate)}{event.startDate !== event.endDate ? ` — ${formatDate(event.endDate)}` : ""}</span><span>⌖ &nbsp;{event.location}</span></div>
+                  <div className="event-card-title"><h3>{event.title}</h3></div>
+                  <div className="event-meta"><span>{formatDate(event.startDate)}{event.startDate !== event.endDate ? ` — ${formatDate(event.endDate)}` : ""}</span><span>{event.location}</span></div>
                   <div className="event-card-footer"><span>{event.durationDays} billable {event.durationDays === 1 ? "day" : "days"}</span><strong>{formatMoney(event.totalCost, event.currency)}</strong></div>
                   <Link className="event-card-link" to={user.role === "CHECK_IN_STAFF" ? `/scanner/${event.id}` : `/events/${event.id}`} aria-label={`${user.role === "CHECK_IN_STAFF" ? "Scan for" : "Manage"} ${event.title}`} />
                 </div>
@@ -97,7 +97,7 @@ export function Dashboard({ user, onLogout }: { user: User; onLogout: () => void
             ))}
           </div>
         ) : (
-          <div className="empty-panel empty-illustration"><div className="empty-flower">✿</div><h3>Your next favorite memory starts here.</h3><p>Create an event to bring all the thoughtful details together.</p>{user.role !== "CHECK_IN_STAFF" && <button className="button button-outline" onClick={() => setShowCreate(true)}>Create your first event <span>↗</span></button>}</div>
+          <div className="empty-panel empty-illustration"><div className="empty-flower">01</div><h3>Your next favorite memory starts here.</h3><p>Create an event to bring all the thoughtful details together.</p>{user.role !== "CHECK_IN_STAFF" && <button className="button button-outline" onClick={() => setShowCreate(true)}>Create your first event</button>}</div>
         )}
       </section>
       {showCreate && <CreateEvent onClose={() => setShowCreate(false)} onCreated={(id) => navigate(`/events/${id}`)} />}

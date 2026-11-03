@@ -33,7 +33,6 @@ export function Login({ onLogin }: { onLogin: (user: User) => void }) {
       <aside className="login-art">
         <Link className="brand brand-light" to="/"><span className="brand-mark">e</span> eventflow</Link>
         <div className="login-art-copy"><span className="eyebrow eyebrow-light">A home for your next big thing</span><h2>All the little details.<br /><em>One lovely place.</em></h2></div>
-        <div className="login-art-shapes"><span>✿</span><span>✳</span><span>♡</span></div>
         <div className="login-art-foot">Thoughtful planning, right on time.</div>
       </aside>
       <section className="login-content">
@@ -45,9 +44,9 @@ export function Login({ onLogin }: { onLogin: (user: User) => void }) {
             <label>Email address<input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" /></label>
             <label>Password<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Your password" /></label>
             {error && <div className="alert alert-error" role="alert">{error}</div>}
-            <button className="button button-dark button-wide" disabled={busy}>{busy ? "Signing in..." : "Sign in"} <span aria-hidden="true">↗</span></button>
+            <button className="button button-dark" type="submit" disabled={busy}>{busy ? "Signing in..." : "Sign in"}</button>
           </form>
-          <p className="login-note">Your administrator can create your EventFlow account.</p>
+          <p className="login-note">New to EventFlow? <Link to="/signup">Create an account</Link></p>
         </div>
       </section>
     </main>

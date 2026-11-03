@@ -20,6 +20,50 @@ const credentialsSchema = z.object({
 export const authRouter = Router();
 
 authRouter.post(
+  "/signup",
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 10,
+    standardHeaders: "draft-7",
+    legacyHeaders: false,
+    message: { error: "Too many account requests. Please try again later." },
+  }),
+  asyncHandler(async (request, response) => {
+    const input = z.object({
+      name: z.string().trim().min(2).max(120),
+      email: z.string().email().transform((email) => email.toLowerCase()),
+      password: z.string().min(12).max(200),
+      confirmPassword: z.string().min(12).max(200),
+    }).refine((value) => value.password === value.confirmPassword, {
+      message: "Passwords do not match",
+      path: ["confirmPassword"],
+    }).parse(request.body);
+
+    const existing = await prisma.user.findUnique({
+      where: { email: input.email },
+      select: { id: true },
+    });
+    if (existing) {
+      response.status(409).json({ error: "An account with this email already exists" });
+      return;
+    }
+
+    const passwordHash = await bcrypt.hash(input.password, 12);
+    const user = await prisma.user.create({
+      data: {
+        name: input.name,
+        email: input.email,
+        passwordHash,
+        role: "EVENT_MANAGER",
+      },
+      select: { id: true, name: true, email: true, role: true },
+    });
+    setSessionCookie(response, createSessionToken(user));
+    response.status(201).json({ user });
+  }),
+);
+
+authRouter.post(
   "/login",
   rateLimit({
     windowMs: 15 * 60 * 1000,

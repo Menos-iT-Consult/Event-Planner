@@ -16,6 +16,137 @@ import { getRouteParam } from "../lib/route-param.js";
 
 export const publicRouter = Router();
 
+publicRouter.get(
+  "/events",
+  asyncHandler(async (request, response) => {
+    const input = z.object({
+      search: z.string().trim().max(100).optional(),
+      type: z.enum(["WEDDING", "VOTING", "GENERAL"]).optional(),
+      location: z.string().trim().max(120).optional(),
+      from: z.string().datetime({ offset: true }).optional(),
+      page: z.coerce.number().int().min(1).default(1),
+      pageSize: z.coerce.number().int().min(1).max(50).default(12),
+    }).parse(request.query);
+
+    const where: Prisma.EventWhereInput = {
+      ...(input.type ? { type: input.type } : {}),
+      ...(input.location ? { location: { contains: input.location, mode: "insensitive" } } : {}),
+      ...(input.search ? {
+        OR: [
+          { title: { contains: input.search, mode: "insensitive" } },
+          { location: { contains: input.search, mode: "insensitive" } },
+          { description: { contains: input.search, mode: "insensitive" } },
+        ],
+      } : {}),
+      ...(input.from ? { endDate: { gte: new Date(input.from) } } : {}),
+    };
+
+    const [events, total] = await Promise.all([
+      prisma.event.findMany({
+        where,
+        orderBy: { startDate: "asc" },
+        skip: (input.page - 1) * input.pageSize,
+        take: input.pageSize,
+        select: {
+          id: true,
+          slug: true,
+          title: true,
+          type: true,
+          startDate: true,
+          endDate: true,
+          location: true,
+          description: true,
+          currency: true,
+        },
+      }),
+      prisma.event.count({ where }),
+    ]);
+    response.json({
+      events,
+      pagination: {
+        page: input.page,
+        pageSize: input.pageSize,
+        total,
+        pageCount: Math.ceil(total / input.pageSize),
+      },
+    });
+  }),
+);
+
+publicRouter.post(
+  "/events/:slug/register",
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 20,
+    standardHeaders: "draft-7",
+    legacyHeaders: false,
+    message: { error: "Too many registration requests. Please try again later." },
+  }),
+  asyncHandler(async (request, response) => {
+    const input = z.object({
+      name: z.string().trim().min(2).max(120),
+      email: z.string().email().transform((email) => email.toLowerCase()),
+      phone: phoneNumberSchema,
+      dietary: z.string().trim().max(500).optional(),
+      quantity: z.number().int().min(1).max(10).default(1),
+    }).parse(request.body);
+    const event = await prisma.event.findUnique({
+      where: { slug: getRouteParam(request, "slug") },
+      select: { id: true, title: true, type: true, startDate: true, location: true },
+    });
+    if (!event) {
+      response.status(404).json({ error: "Event not found" });
+      return;
+    }
+    if (event.type !== EventType.GENERAL) {
+      response.status(400).json({ error: "Free registration is available for general events only" });
+      return;
+    }
+
+    const passToken = createOpaqueToken();
+    const guest = await prisma.guest.create({
+      data: {
+        eventId: event.id,
+        name: input.name,
+        phone: input.phone,
+        email: input.email,
+        status: RsvpStatus.ATTENDING,
+        plusOnes: input.quantity - 1,
+        dietary: input.dietary || null,
+        passTokenHash: hashOpaqueToken(passToken),
+      },
+    });
+
+    let qrObjectKey: string | null = null;
+    try {
+      qrObjectKey = await createPassQr(event.id, passToken);
+      await prisma.guest.update({
+        where: { id: guest.id },
+        data: { qrObjectKey },
+      });
+    } catch (error) {
+      console.error("Could not create free registration pass", error);
+    }
+
+    const passUrl = `${config.WEB_ORIGIN}/pass/${passToken}`;
+    await sendEventSms(
+      event.id,
+      input.phone,
+      `Registration confirmed for ${event.title}. Your pass: ${passUrl}`,
+    );
+
+    response.status(201).json({
+      registration: {
+        id: guest.id,
+        name: guest.name,
+        quantity: input.quantity,
+        passUrl,
+        event: { title: event.title, startDate: event.startDate, location: event.location },
+      },
+    });
+  }),
+);
+
 const voteLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 30,

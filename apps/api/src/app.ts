@@ -10,6 +10,7 @@ import { eventsRouter } from "./routes/events.js";
 import { publicRouter } from "./routes/public.js";
 import { webhooksRouter } from "./routes/webhooks.js";
 import { errorHandler, notFound } from "./middleware/errors.js";
+import { prisma } from "./db.js";
 
 export const app = express();
 export default app;
@@ -32,8 +33,18 @@ app.use((request, response, next) => {
 });
 app.use(cookieParser());
 
-app.get("/health", (_request, response) => {
-  response.json({ status: "ok", service: "eventflow-api" });
+app.get("/health", async (_request, response) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    response.json({ status: "ok", service: "eventflow-api", database: "ok" });
+  } catch (error: unknown) {
+    console.error("Database health check failed", error);
+    response.status(503).json({
+      status: "error",
+      service: "eventflow-api",
+      database: "unavailable",
+    });
+  }
 });
 
 app.use(

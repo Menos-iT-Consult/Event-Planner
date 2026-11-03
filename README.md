@@ -55,6 +55,42 @@ npm run db:seed
 
 `npm run db:migrate` uses Prisma Migrate's development workflow and requires a reachable PostgreSQL database. Apply committed migrations with `npm run db:deploy` in production.
 
+## Vercel multi-service deployment
+
+The repository deploys as two services defined in `vercel.json`:
+
+- `api` builds from `apps/api` and is publicly routed at `/api/*` and `/health`.
+- `web` builds from `apps/web` and is publicly routed at `/*`.
+
+Configure these environment variables in the Vercel project and expose them to both services:
+
+```env
+NODE_ENV=production
+DATABASE_URL=postgresql://...
+JWT_SECRET=<at-least-32-random-characters>
+JWT_EXPIRES_IN=8h
+COOKIE_SECURE=true
+WEB_ORIGIN=https://your-production-domain.example
+API_ORIGIN=https://your-production-domain.example
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=<strong-password-at-least-12-characters>
+WEDDING_DAILY_RATE=100
+VOTING_DAILY_RATE=150
+GENERAL_DAILY_RATE=125
+```
+
+`WEB_ORIGIN` must exactly match the browser origin sent by the web service, including `https://` and without a trailing slash. If a custom domain is used, configure it in both `WEB_ORIGIN` and `API_ORIGIN`.
+
+After setting the environment variables, redeploy and apply the migration from a trusted local or CI shell:
+
+```powershell
+$env:DATABASE_URL='postgresql://...'
+npm run db:deploy
+npm run db:seed
+```
+
+Verify the API with `https://your-production-domain.example/health`. It should report `"database":"ok"`.
+
 ## Security and operations
 
 - Admins, event managers, and check-in staff use HTTP-only session cookies; event-scoped manager and scanner access is checked against current database membership.

@@ -1,0 +1,36 @@
+{
+  "name": "eventflow",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Multi-event management platform",
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c blue,green \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "npm --workspace @eventflow/api run dev",
+    "dev:web": "npm --workspace @eventflow/web run dev",
+    "build": "npm run build --workspace @eventflow/api && npm run build --workspace @eventflow/web",
+    "test": "npm run test --workspace @eventflow/api",
+    "typecheck": "npm run typecheck --workspace @eventflow/api && npm run typecheck --workspace @eventflow/web",
+    "db:generate": "npm --workspace @eventflow/api run db:generate",
+    "db:migrate": "npm --workspace @eventflow/api run db:migrate",
+    "db:deploy": "npm --workspace @eventflow/api run db:deploy",
+    "db:seed": "npm --workspace @eventflow/api run db:seed"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.25",
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=20.19"
+  },
+  "allowScripts": {
+    "@prisma/engines": true,
+    "esbuild": true,
+    "prisma": true,
+    "@prisma/client": true
+  }
+}

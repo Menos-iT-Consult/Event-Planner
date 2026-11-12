@@ -91,8 +91,8 @@ export function ResetPassword() {
       <p className="muted account-intro">Use the recovery token from your email, or open this page with a valid recovery link.</p>
       <form className="stack-form" onSubmit={submit}>
         <label>Recovery token<input required minLength={32} value={token} onChange={(event) => setToken(event.target.value)} /></label>
-        <label>New password<input type="password" minLength={12} required autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
-        <label>Confirm password<input type="password" minLength={12} required autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></label>
+        <label>New password<input type="password" minLength={8} required autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+        <label>Confirm password<input type="password" minLength={8} required autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></label>
         {error && <div className="alert alert-error" role="alert">{error}</div>}
         {message && <div className="alert alert-success" role="status">{message}</div>}
         <button className="button button-dark" disabled={busy}>{busy ? <CubeLoader label="Reset" compact /> : "Reset password"}</button>

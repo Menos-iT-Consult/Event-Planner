@@ -116,7 +116,7 @@ authRouter.post(
   asyncHandler(async (request, response) => {
     const input = z.object({
       currentPassword: z.string().min(1).max(200),
-      newPassword: z.string().min(12).max(200),
+      newPassword: z.string().min(8).max(200),
     }).parse(request.body);
     const authUser = (request as AuthenticatedRequest).user!;
     const user = await prisma.user.findUnique({ where: { id: authUser.id } });
@@ -145,8 +145,8 @@ authRouter.post(
     const input = z.object({
       name: z.string().trim().min(2).max(120),
       email: z.string().email().transform((email) => email.toLowerCase()),
-      password: z.string().min(12).max(200),
-      confirmPassword: z.string().min(12).max(200),
+      password: z.string().min(8).max(200),
+      confirmPassword: z.string().min(8).max(200),
     }).refine((value) => value.password === value.confirmPassword, {
       message: "Passwords do not match",
       path: ["confirmPassword"],
@@ -336,8 +336,8 @@ authRouter.post(
   asyncHandler(async (request, response) => {
     const input = z.object({
       token: z.string().min(32).max(200),
-      password: z.string().min(12).max(200),
-      confirmPassword: z.string().min(12).max(200),
+      password: z.string().min(8).max(200),
+      confirmPassword: z.string().min(8).max(200),
     }).refine((value) => value.password === value.confirmPassword, {
       message: "Passwords do not match",
       path: ["confirmPassword"],

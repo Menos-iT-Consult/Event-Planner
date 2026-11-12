@@ -17,7 +17,7 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().default("8h"),
   COOKIE_SECURE: z.enum(["true", "false"]).transform((value) => value === "true").default("false"),
   ADMIN_EMAIL: z.string().email().optional(),
-  ADMIN_PASSWORD: z.string().min(12).optional(),
+  ADMIN_PASSWORD: z.string().min(8).optional(),
   WEDDING_DAILY_RATE: z.coerce.number().nonnegative().max(9_999_999_999.99).refine(hasTwoDecimalPlaces).default(100),
   VOTING_DAILY_RATE: z.coerce.number().nonnegative().max(9_999_999_999.99).refine(hasTwoDecimalPlaces).default(150),
   GENERAL_DAILY_RATE: z.coerce.number().nonnegative().max(9_999_999_999.99).refine(hasTwoDecimalPlaces).default(125),

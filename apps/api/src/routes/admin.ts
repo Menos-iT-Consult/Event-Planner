@@ -15,7 +15,7 @@ const settingSchema = z.object({
 const userSchema = z.object({
   name: z.string().trim().min(1).max(120),
   email: z.string().email().transform((email) => email.toLowerCase()),
-  password: z.string().min(12).max(200),
+  password: z.string().min(8).max(200),
   role: z.enum(["ADMIN", "EVENT_MANAGER", "CHECK_IN_STAFF"]),
 });
 
@@ -127,7 +127,7 @@ adminRouter.get("/users", asyncHandler(async (_request, response) => {
 
 adminRouter.post("/users/:userId/reset-password", asyncHandler(async (request, response) => {
   const userId = z.string().uuid().parse(request.params.userId);
-  const input = z.object({ password: z.string().min(12).max(200) }).parse(request.body);
+  const input = z.object({ password: z.string().min(8).max(200) }).parse(request.body);
   const target = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true } });
   if (!target) {
     response.status(404).json({ error: "User account not found" });

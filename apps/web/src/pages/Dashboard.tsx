@@ -54,7 +54,7 @@ export function Dashboard({ user, onLogout, eventType }: { user: User; onLogout:
 
   async function changePassword() {
     const currentPassword = window.prompt("Current password");
-    const newPassword = window.prompt("New password (at least 12 characters)");
+    const newPassword = window.prompt("New password (at least 8 characters)");
     if (!currentPassword || !newPassword) return;
     try {
       await api("/api/auth/change-password", {

@@ -17,10 +17,29 @@ const webhookSchema = z.object({
     status: z.string(),
     amount: z.number().int().nonnegative(),
     currency: z.string(),
+    metadata: z.record(z.union([z.string(), z.number(), z.null()])).optional(),
   }),
 });
 
 export const webhooksRouter = Router();
+
+async function incrementPromoRedemption(eventId: string, code: unknown): Promise<void> {
+  if (typeof code !== "string" || !code.trim()) return;
+  const promo = await prisma.promoCode.findFirst({
+    where: {
+      eventId,
+      code: code.trim().toUpperCase(),
+      enabled: true,
+    },
+    select: { id: true, redemptions: true, maxRedemptions: true },
+  });
+  if (!promo) return;
+  if (promo.maxRedemptions !== null && promo.redemptions >= promo.maxRedemptions) return;
+  await prisma.promoCode.update({
+    where: { id: promo.id },
+    data: { redemptions: { increment: 1 } },
+  });
+}
 
 async function removeOrphanedPasses(keys: string[]): Promise<void> {
   const results = await Promise.allSettled(keys.map((key) => deletePrivateObject(key)));
@@ -106,6 +125,7 @@ webhooksRouter.post(
         response.status(200).json({ received: true, duplicate: true });
         return;
       }
+      await incrementPromoRedemption(votePurchase.eventId, webhook.data.metadata?.promoCode);
       const sms = await sendEventSms(
         votePurchase.eventId,
         votePurchase.voterPhone,
@@ -234,6 +254,7 @@ webhooksRouter.post(
       console.error("Could not fulfill Paystack order", { orderId: order.id, error });
       throw error;
     }
+    await incrementPromoRedemption(order.eventId, webhook.data.metadata?.promoCode);
 
     const links = passTokens
       .map((token, index) => `${index + 1}: ${config.WEB_ORIGIN}/pass/${token}`)

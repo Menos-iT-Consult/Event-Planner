@@ -10,7 +10,13 @@ import { Pass } from "./pages/Pass";
 import { Scanner } from "./pages/Scanner";
 import { PaymentReturn } from "./pages/PaymentReturn";
 import { Signup } from "./pages/Signup";
-import { AboutPage, ContactPage, EventsPage, PricingPage, PrivacyPage, TermsPage } from "./pages/PublicPages";
+import { ForgotPassword, ResetPassword, TwoFactorChallenge } from "./pages/AccountSecurity";
+import { TwoFactorSetup } from "./pages/TwoFactorSetup";
+import { AboutPage, ContactPage, EventsPage, HelpPage, PricingPage, PrivacyPage, PublicHeader, TermsPage } from "./pages/PublicPages";
+import { CubeLoader } from "./components/CubeLoader";
+import { SmsOptOut } from "./pages/SmsOptOut";
+import { ProductLanding } from "./pages/ProductLanding";
+import { eventProducts, getProductReturnPath } from "./products";
 
 export interface User {
   id: string;
@@ -45,18 +51,24 @@ export function App() {
       !location.pathname.startsWith("/pass/") &&
       !location.pathname.startsWith("/passes/") &&
       !location.pathname.startsWith("/e/") &&
-      !["/events", "/pricing", "/about", "/contact", "/privacy", "/terms", "/signup"].includes(location.pathname)) {
-    return <main className="loading-screen">Loading EventFlow...</main>;
+      !["/events", "/pricing", "/about", "/contact", "/help", "/privacy", "/terms", "/signup", "/weddings", "/voting", "/general-events", "/forgot-password", "/reset-password", "/two-factor", "/security/two-factor", "/sms-opt-out"].includes(location.pathname)) {
+    return <main className="loading-screen"><CubeLoader label="EventFlow" /></main>;
   }
 
   return (
     <Routes>
-      <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <Login onLogin={setUser} />} />
-      <Route path="/signup" element={user ? <Navigate to="/dashboard" replace /> : <Signup onSignup={setUser} />} />
+      <Route path="/login" element={user ? <Navigate to={getProductReturnPath(location.search)} replace /> : <Login onLogin={setUser} />} />
+      <Route path="/signup" element={user ? <Navigate to={getProductReturnPath(location.search)} replace /> : <Signup onSignup={setUser} />} />
+      <Route path="/forgot-password" element={user ? <Navigate to="/dashboard" replace /> : <ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
+      <Route path="/two-factor" element={user ? <Navigate to={getProductReturnPath(location.search)} replace /> : <TwoFactorChallenge onLogin={setUser} />} />
+      <Route path="/security/two-factor" element={user ? <TwoFactorSetup /> : <Navigate to="/login" replace />} />
+      <Route path="/sms-opt-out" element={<SmsOptOut />} />
       <Route path="/events" element={<EventsPage />} />
       <Route path="/pricing" element={<PricingPage />} />
       <Route path="/about" element={<AboutPage />} />
       <Route path="/contact" element={<ContactPage />} />
+      <Route path="/help" element={<HelpPage />} />
       <Route path="/privacy" element={<PrivacyPage />} />
       <Route path="/terms" element={<TermsPage />} />
       <Route path="/rsvp/:token" element={<Rsvp />} />
@@ -69,10 +81,16 @@ export function App() {
         path="/events/:eventId"
         element={user ? <EventWorkspace user={user} /> : <Navigate to="/login" replace />}
       />
-      <Route
-        path="/dashboard"
-        element={user ? <Dashboard user={user} onLogout={() => setUser(null)} /> : <Navigate to="/login" replace />}
-      />
+      <Route path="/dashboard" element={user ? <Dashboard user={user} onLogout={() => setUser(null)} /> : <Navigate to="/login" replace />} />
+      {eventProducts.map((product) => (
+        <Route
+          key={product.path}
+          path={product.path}
+          element={user
+            ? <Dashboard user={user} onLogout={() => setUser(null)} eventType={product.type} />
+            : <ProductLanding product={product} />}
+        />
+      ))}
       <Route path="/" element={<Home />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
@@ -82,11 +100,7 @@ export function App() {
 function Home() {
   return (
     <main className="home-shell">
-      <nav className="public-nav">
-        <Link className="brand" to="/"><span className="brand-mark">e</span> eventflow</Link>
-        <div className="public-links"><Link to="/events">Events</Link><Link to="/pricing">Pricing</Link><Link to="/about">About</Link><Link to="/contact">Contact</Link></div>
-        <div><Link className="button button-outline" to="/signup">Create account</Link> <Link className="button button-dark" to="/login">Sign in</Link></div>
-      </nav>
+      <PublicHeader />
       <section className="hero">
         <div className="hero-copy">
           <div className="eyebrow"><span className="eyebrow-dot" /> Everything in its moment</div>
@@ -108,6 +122,15 @@ function Home() {
         <div><span className="feature-icon">01</span><strong>Every kind of gathering</strong><span>Weddings, contests, and the moments in between.</span></div>
         <div><span className="feature-icon">02</span><strong>Thoughtful by design</strong><span>Guests, schedules, tickets, and details in sync.</span></div>
         <div><span className="feature-icon">03</span><strong>People first, always</strong><span>More time for the things you’ll remember.</span></div>
+      </section>
+      <section className="home-information">
+        <header><span className="eyebrow">THE COMPLETE EXPERIENCE</span><h2>From invitation to arrival.</h2></header>
+        <div className="home-information-grid">
+          <article><span>01</span><h3>Wedding planning</h3><p>Manage guests, RSVPs, dietary needs, plus-one allowances, budgets, vendors, registries, seating plans, and SMS updates.</p></article>
+          <article><span>02</span><h3>Voting and contests</h3><p>Build categories, publish candidate profiles, accept free or paid votes, protect duplicate voting, and share live leaderboards.</p></article>
+          <article><span>03</span><h3>Event operations</h3><p>Create ticket tiers, schedules, promos, waitlists, surveys, certificates, invoices, passes, scanner access, refunds, and recurring sessions.</p></article>
+          <article><span>04</span><h3>Platform control</h3><p>Use administrator roles, audit history, notification templates, contact queues, password recovery, two-factor login, exports, and provider monitoring.</p></article>
+        </div>
       </section>
       <footer className="home-footer"><Link className="brand" to="/"><span className="brand-mark">e</span> eventflow</Link><span>Gather well. Remember more.</span><span>© 2026 EventFlow</span></footer>
     </main>

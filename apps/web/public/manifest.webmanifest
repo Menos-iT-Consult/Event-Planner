@@ -1,0 +1,17 @@
+{
+  "name": "EventFlow",
+  "short_name": "EventFlow",
+  "description": "Thoughtful event management for weddings, contests, and gatherings.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f6f1",
+  "theme_color": "#12241f",
+  "icons": [
+    {
+      "src": "/eventflow-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

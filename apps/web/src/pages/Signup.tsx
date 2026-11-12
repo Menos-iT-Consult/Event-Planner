@@ -1,13 +1,18 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import type { User } from "../App";
 import { api } from "../api";
+import { CubeLoader } from "../components/CubeLoader";
+import { getProductReturnPath } from "../products";
+import "./Signup.css";
 
 export function Signup({ onSignup }: { onSignup: (user: User) => void }) {
   const [form, setForm] = useState({ name: "", email: "", password: "", confirmPassword: "" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const location = useLocation();
+  const returnTo = getProductReturnPath(location.search);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -23,7 +28,7 @@ export function Signup({ onSignup }: { onSignup: (user: User) => void }) {
         body: JSON.stringify(form),
       });
       onSignup(result.user);
-      window.location.assign("/dashboard");
+      window.location.assign(returnTo);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not create your account");
     } finally {
@@ -32,7 +37,7 @@ export function Signup({ onSignup }: { onSignup: (user: User) => void }) {
   }
 
   return (
-    <main className="login-layout">
+    <main className="login-layout signup-shell">
       <aside className="login-art">
         <Link className="brand brand-light" to="/"><span className="brand-mark">e</span> eventflow</Link>
         <div className="login-art-copy">
@@ -53,9 +58,9 @@ export function Signup({ onSignup }: { onSignup: (user: User) => void }) {
             <label>Confirm password<input required minLength={12} maxLength={200} type="password" autoComplete="new-password" value={form.confirmPassword} onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })} /></label>
             <small className="muted">Use at least 12 characters.</small>
             {error && <div className="alert alert-error" role="alert">{error}</div>}
-            <button className="button button-dark button-wide" disabled={busy}>{busy ? "Creating account..." : "Create account"}</button>
+            <button className="button button-dark button-wide" disabled={busy}>{busy ? <CubeLoader label="Account" compact /> : "Create account"}</button>
           </form>
-          <p className="login-note">Already have an account? <Link to="/login">Sign in</Link></p>
+          <p className="login-note">Already have an account? <Link to={`/login?next=${encodeURIComponent(returnTo)}`}>Sign in</Link></p>
         </div>
       </section>
     </main>

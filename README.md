@@ -24,6 +24,7 @@ EventFlow is a multi-event planning and ticketing platform built with React, Typ
    npm run db:generate
    npm run db:migrate
    npm run db:seed
+   npm run test:e2e
    npm run dev
    ```
 
@@ -43,6 +44,7 @@ The web app uses Vite's `/api` proxy in local development. When hosting the web 
 ## Useful commands
 
 ```powershell
+npm start
 npm run dev
 npm run build
 npm run typecheck
@@ -98,6 +100,13 @@ Verify the API with `https://your-production-domain.example/health`. It should r
 - Paystack webhook signatures are checked against the raw request body. Payment fulfillment is idempotent and ticket passes are generated only after payment verification.
 - Configure `COOKIE_SECURE=true` behind HTTPS in production, use strong unique secrets, restrict the R2 bucket and provider credentials, and configure database backups and monitoring.
 - The built-in in-memory API rate limiter is intended for a single API instance. Use a shared rate-limit store or enforce equivalent limits at the edge before running multiple API replicas.
+- Public feature routes have a general per-IP limit; opt-out attempts and privacy requests have stricter per-IP limits. Keep equivalent protections at the edge when scaling out.
+- Refund requests are accepted only for paid orders belonging to the published event, and must match the order's full amount and currency. Refund completion is claimed once; if the Paystack result is ambiguous, verify it in the provider dashboard before resolving or retrying the request.
+- Background jobs that remain unresponsive for an hour are marked dead for operator review rather than automatically re-executed, since the external side effect may already have occurred. Active jobs renew their lease every ten minutes. Verify provider state before manually retrying a recovered job.
+- Scheduled SMS is sent once at its scheduled time. Partial or interrupted delivery is reported for operator review and is not automatically retried, to avoid duplicate texts. SMS readiness checks verify configuration, not end-to-end provider delivery.
+- Privacy deletion requests remain pending for an administrator to verify identity, review legal retention obligations, fulfill the request, and then mark it complete. The request queue does not automatically delete account or event data.
+- Use your PostgreSQL provider's automated backups or point-in-time recovery. Keep backups encrypted and access-restricted, define a recovery-point objective, and periodically restore a backup into an isolated database before applying production migrations. Verify the app against the restored database before treating the restore as successful.
+- Run `npm run test:e2e` for the browser smoke tests; these mock the authentication and password-recovery API responses and do not replace database-backed integration or payment-provider tests.
 
 ## Workspace layout
 

@@ -16,6 +16,50 @@ import { getRouteParam } from "../lib/route-param.js";
 
 export const publicRouter = Router();
 
+async function resolvePromoDiscount(eventId: string, code: string | undefined, amount: Prisma.Decimal) {
+  if (!code) return { amount, promo: null };
+  const now = new Date();
+  const promo = await prisma.promoCode.findFirst({
+    where: {
+      eventId,
+      code: code.trim().toUpperCase(),
+      enabled: true,
+      OR: [{ startsAt: null }, { startsAt: { lte: now } }],
+      AND: [{ OR: [{ endsAt: null }, { endsAt: { gte: now } }] }],
+    },
+  });
+  if (!promo || (promo.maxRedemptions !== null && promo.redemptions >= promo.maxRedemptions)) {
+    throw new Error("PROMO_INVALID");
+  }
+  let discounted = amount;
+  if (promo.percentOff) discounted = amount.mul(new Prisma.Decimal(100).sub(promo.percentOff)).div(100);
+  if (promo.amountOff) {
+    discounted = discounted.sub(promo.amountOff);
+    if (discounted.isNegative()) discounted = new Prisma.Decimal(0);
+  }
+  return { amount: discounted.toDecimalPlaces(2), promo };
+}
+
+publicRouter.post(
+  "/contact",
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 10,
+    standardHeaders: "draft-7",
+    legacyHeaders: false,
+    message: { error: "Too many contact requests. Please try again later." },
+  }),
+  asyncHandler(async (request, response) => {
+    const input = z.object({
+      name: z.string().trim().min(2).max(120),
+      email: z.string().email().transform((email) => email.toLowerCase()),
+      message: z.string().trim().min(10).max(5000),
+    }).parse(request.body);
+    const message = await prisma.contactMessage.create({ data: input });
+    response.status(201).json({ submitted: true, id: message.id });
+  }),
+);
+
 publicRouter.get(
   "/events",
   asyncHandler(async (request, response) => {
@@ -29,6 +73,7 @@ publicRouter.get(
     }).parse(request.query);
 
     const where: Prisma.EventWhereInput = {
+      isPublished: true,
       ...(input.type ? { type: input.type } : {}),
       ...(input.location ? { location: { contains: input.location, mode: "insensitive" } } : {}),
       ...(input.search ? {
@@ -90,8 +135,8 @@ publicRouter.post(
       dietary: z.string().trim().max(500).optional(),
       quantity: z.number().int().min(1).max(10).default(1),
     }).parse(request.body);
-    const event = await prisma.event.findUnique({
-      where: { slug: getRouteParam(request, "slug") },
+    const event = await prisma.event.findFirst({
+      where: { slug: getRouteParam(request, "slug"), isPublished: true },
       select: { id: true, title: true, type: true, startDate: true, location: true },
     });
     if (!event) {
@@ -104,28 +149,40 @@ publicRouter.post(
     }
 
     const passToken = createOpaqueToken();
-    const guest = await prisma.guest.create({
-      data: {
-        eventId: event.id,
-        name: input.name,
-        phone: input.phone,
-        email: input.email,
-        status: RsvpStatus.ATTENDING,
-        plusOnes: input.quantity - 1,
-        dietary: input.dietary || null,
-        passTokenHash: hashOpaqueToken(passToken),
-      },
-    });
-
-    let qrObjectKey: string | null = null;
+    let qrObjectKey: string;
     try {
       qrObjectKey = await createPassQr(event.id, passToken);
-      await prisma.guest.update({
-        where: { id: guest.id },
-        data: { qrObjectKey },
+    } catch (error) {
+      console.error("Could not create free registration pass", { eventId: event.id, error });
+      response.status(503).json({ error: "Registration is temporarily unavailable. Please try again." });
+      return;
+    }
+
+    let guest;
+    try {
+      guest = await prisma.guest.create({
+        data: {
+          eventId: event.id,
+          name: input.name,
+          phone: input.phone,
+          email: input.email,
+          status: RsvpStatus.ATTENDING,
+          plusOnes: input.quantity - 1,
+          dietary: input.dietary || null,
+          passTokenHash: hashOpaqueToken(passToken),
+          qrObjectKey,
+        },
       });
     } catch (error) {
-      console.error("Could not create free registration pass", error);
+      try {
+        await deletePrivateObject(qrObjectKey);
+      } catch (cleanupError) {
+        console.error("Could not remove registration pass after database failure", {
+          eventId: event.id,
+          error: cleanupError,
+        });
+      }
+      throw error;
     }
 
     const passUrl = `${config.WEB_ORIGIN}/pass/${passToken}`;
@@ -179,8 +236,8 @@ publicRouter.get(
 publicRouter.get(
   "/events/:slug",
   asyncHandler(async (request, response) => {
-    const event = await prisma.event.findUnique({
-      where: { slug: getRouteParam(request, "slug") },
+    const event = await prisma.event.findFirst({
+      where: { slug: getRouteParam(request, "slug"), isPublished: true },
       select: {
         id: true,
         slug: true,
@@ -339,8 +396,8 @@ publicRouter.post(
       candidateId: z.string().uuid(),
       voterContact: voterContactSchema,
     }).parse(request.body);
-    const event = await prisma.event.findUnique({
-      where: { slug: getRouteParam(request, "slug") },
+    const event = await prisma.event.findFirst({
+      where: { slug: getRouteParam(request, "slug"), isPublished: true },
       select: { id: true, type: true, title: true },
     });
     if (!event || event.type !== EventType.VOTING) {
@@ -400,9 +457,10 @@ publicRouter.post(
       quantity: z.number().int().min(1).max(100),
       email: z.string().email(),
       phone: phoneNumberSchema,
+      promoCode: z.string().trim().min(3).max(40).optional(),
     }).parse(request.body);
-    const event = await prisma.event.findUnique({
-      where: { slug: getRouteParam(request, "slug") },
+    const event = await prisma.event.findFirst({
+      where: { slug: getRouteParam(request, "slug"), isPublished: true },
       select: { id: true, type: true, title: true, currency: true, voteUnitPrice: true },
     });
     if (!event || event.type !== EventType.VOTING) {
@@ -423,6 +481,19 @@ publicRouter.post(
     }
 
     const reference = `EVF-VOTE-${randomUUID()}`;
+    let discountedAmount: Prisma.Decimal;
+    let promo: Awaited<ReturnType<typeof resolvePromoDiscount>>["promo"];
+    try {
+      const resolved = await resolvePromoDiscount(event.id, input.promoCode, event.voteUnitPrice.mul(input.quantity));
+      discountedAmount = resolved.amount;
+      promo = resolved.promo;
+    } catch (error) {
+      if (error instanceof Error && error.message === "PROMO_INVALID") {
+        response.status(400).json({ error: "Promotion code is invalid or expired" });
+        return;
+      }
+      throw error;
+    }
     const purchase = await prisma.votePurchase.create({
       data: {
         eventId: event.id,
@@ -432,7 +503,7 @@ publicRouter.post(
         voterEmail: input.email,
         voterPhone: input.phone,
         quantity: input.quantity,
-        amount: event.voteUnitPrice.mul(input.quantity),
+        amount: discountedAmount,
         currency: event.currency,
         paymentReference: reference,
       },
@@ -442,7 +513,7 @@ publicRouter.post(
         email: input.email,
         amountMinor: purchase.amount.mul(100).toNumber(),
         reference,
-        metadata: { votePurchaseId: purchase.id, eventId: event.id, quantity: input.quantity },
+          metadata: { votePurchaseId: purchase.id, eventId: event.id, quantity: input.quantity, promoCode: input.promoCode ?? "" },
       });
       response.status(201).json({
         authorizationUrl: payment.authorizationUrl,
@@ -462,8 +533,8 @@ publicRouter.post(
 publicRouter.get(
   "/events/:slug/leaderboard",
   asyncHandler(async (request, response) => {
-    const event = await prisma.event.findUnique({
-      where: { slug: getRouteParam(request, "slug") },
+    const event = await prisma.event.findFirst({
+      where: { slug: getRouteParam(request, "slug"), isPublished: true },
       select: { id: true, type: true },
     });
     if (!event || event.type !== EventType.VOTING) {
@@ -494,9 +565,10 @@ publicRouter.post(
       purchaserName: z.string().trim().min(1).max(120),
       purchaserEmail: z.string().email(),
       purchaserPhone: phoneNumberSchema,
+      promoCode: z.string().trim().min(3).max(40).optional(),
     }).parse(request.body);
-    const event = await prisma.event.findUnique({
-      where: { slug: getRouteParam(request, "slug") },
+    const event = await prisma.event.findFirst({
+      where: { slug: getRouteParam(request, "slug"), isPublished: true },
       select: { id: true, title: true, currency: true },
     });
     if (!event) {
@@ -514,6 +586,16 @@ publicRouter.post(
     if (!tier) {
       response.status(404).json({ error: "Ticket tier not found" });
       return;
+    }
+    let discountedAmount: Prisma.Decimal;
+    try {
+      discountedAmount = (await resolvePromoDiscount(event.id, input.promoCode, tier.price.mul(input.quantity))).amount;
+    } catch (error) {
+      if (error instanceof Error && error.message === "PROMO_INVALID") {
+        response.status(400).json({ error: "Promotion code is invalid or expired" });
+        return;
+      }
+      throw error;
     }
 
     const accessToken = createOpaqueToken();
@@ -540,7 +622,7 @@ publicRouter.post(
             purchaserEmail: input.purchaserEmail,
             purchaserPhone: input.purchaserPhone,
             quantity: input.quantity,
-            amount: tier.price.mul(input.quantity),
+            amount: discountedAmount,
             currency: event.currency,
             paymentReference: reference,
             accessTokenHash: hashOpaqueToken(accessToken),
@@ -561,7 +643,7 @@ publicRouter.post(
         email: input.purchaserEmail,
         amountMinor: order.amount.mul(100).toNumber(),
         reference,
-        metadata: { orderId: order.id, eventId: event.id, quantity: input.quantity },
+          metadata: { orderId: order.id, eventId: event.id, quantity: input.quantity, promoCode: input.promoCode ?? "" },
       });
       response.status(201).json({
         authorizationUrl: payment.authorizationUrl,

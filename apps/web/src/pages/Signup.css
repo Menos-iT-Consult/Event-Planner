@@ -1,0 +1,6 @@
+.signup-shell { isolation: isolate; }
+.signup-shell .login-form-wrap { animation: signup-enter .35s ease-out; }
+@keyframes signup-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}

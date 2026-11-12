@@ -1,0 +1,5 @@
+.contact-layout { max-width: 680px; margin-bottom: 60px; padding: 28px; border: 1px solid #e4e7de; border-radius: 7px; background: var(--paper); }
+.contact-layout textarea { min-height: 150px; }
+@media (max-width: 760px) {
+  .contact-layout { padding: 18px; }
+}

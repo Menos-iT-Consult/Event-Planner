@@ -1,0 +1,17 @@
+.account-security-layout { display: grid; min-height: 100vh; grid-template-columns: minmax(340px, .9fr) 1.1fr; background: #fffefa; }
+.account-security-layout .login-content { overflow-y: auto; }
+.account-intro { margin: 0 0 24px !important; line-height: 1.7; }
+.account-page-link { min-height: 24px; text-align: center; }
+.two-factor-setup { display: flex; flex-direction: column; gap: 18px; margin-top: 18px; }
+.setup-key { display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px solid #dfe3da; border-radius: 7px; background: #f7f7f2; }
+.setup-key span { color: var(--muted); font-size: 11px; }
+.setup-key strong { overflow-wrap: anywhere; letter-spacing: 2px; }
+.backup-codes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; padding: 14px; border-radius: 7px; background: #eef3eb; }
+.backup-codes strong { grid-column: 1 / -1; margin-bottom: 4px; }
+.backup-codes code { font-size: 11px; }
+.two-factor-disable { margin-top: 28px; padding-top: 22px; border-top: 1px solid var(--line); }
+.two-factor-disable h2 { margin: 0; font-family: var(--serif); font-size: 22px; font-weight: 400; }
+@media (max-width: 760px) {
+  .account-security-layout { grid-template-columns: 1fr; }
+  .account-security-layout .login-art { min-height: 190px; }
+}

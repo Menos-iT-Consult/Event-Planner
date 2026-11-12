@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Html5Qrcode } from "html5-qrcode";
 import { Link, useParams } from "react-router-dom";
 import { ApiError, api } from "../api";
+import { CubeLoader } from "../components/CubeLoader";
 
 interface ScanResult {
   checkedIn: boolean;
@@ -104,7 +105,7 @@ export function Scanner() {
         <div className="scanner-divider"><span>OR ENTER A PASS LINK</span></div>
         <form className="scanner-manual" onSubmit={(event) => { event.preventDefault(); void checkIn(token); }}>
           <input value={token} onChange={(event) => setToken(event.target.value)} placeholder="Paste a pass code or URL" aria-label="Pass code or URL" />
-          <button className="button button-dark" disabled={busy || !token.trim()}>{busy ? "Checking..." : "Check in"}</button>
+          <button className="button button-dark" disabled={busy || !token.trim()}>{busy ? <CubeLoader label="Check" compact /> : "Check in"}</button>
         </form>
         {error && <div className="alert alert-error" role="alert">{error}</div>}
         {result && <div className="scan-success"><strong>{result}</strong><small>Ready for the next arrival.</small></div>}

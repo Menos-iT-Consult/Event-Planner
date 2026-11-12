@@ -3,61 +3,44 @@ import type { FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import type { User } from "../App";
 import { api, formatDate, formatMoney } from "../api";
-
-interface EventData {
-  id: string;
-  slug: string;
-  title: string;
-  type: "WEDDING" | "VOTING" | "GENERAL";
-  startDate: string;
-  endDate: string;
-  durationDays: number;
-  totalCost: string;
-  dailyRate: string;
-  currency: string;
-  location: string;
-  description?: string | null;
-  _count: { guests: number; categories: number; orders: number };
-}
-interface Guest {
-  id: string;
-  name: string;
-  phone: string;
-  email?: string | null;
-  status: string;
-  plusOnes: number;
-  dietary?: string | null;
-  checkedInAt?: string | null;
-}
-interface Category {
-  id: string;
-  name: string;
-  candidates: { id: string; name: string; description?: string | null; votesCount: number }[];
-}
-interface WorkspaceData {
-  guests: Guest[];
-  categories: Category[];
-  budget: { id: string; category: string; estimatedCost: string; actualCost?: string | null; paid: boolean }[];
-  vendors: { id: string; name: string; service: string; phone?: string | null; email?: string | null; agreedCost?: string | null }[];
-  registry: { id: string; title: string; url?: string | null; price?: string | null; claimed: boolean }[];
-  sessions: { id: string; title: string; startsAt: string; endsAt: string; location?: string | null; speaker?: string | null }[];
-  tiers: { id: string; name: string; price: string; quantity: number; sold: number }[];
-}
+import { CubeLoader } from "../components/CubeLoader";
+import { getEventProduct } from "../products";
+import { GeneralEventWorkspace } from "./GeneralEventWorkspace";
+import { VotingEventWorkspace } from "./VotingEventWorkspace";
+import { WeddingEventWorkspace } from "./WeddingEventWorkspace";
+import type { AnalyticsData, Category, EventData, Guest, WorkspaceData } from "./workspace-types";
 
 const emptyData: WorkspaceData = {
   guests: [], categories: [], budget: [], vendors: [], registry: [], sessions: [], tiers: [],
 };
 
-const tabs = [
-  ["overview", "Overview"],
-  ["guests", "Guests"],
-  ["programme", "Programme"],
-  ["tickets", "Tickets"],
-  ["engage", "Engage"],
-  ["wedding", "Wedding details"],
-  ["updates", "Updates"],
-  ["team", "Event team"],
-] as const;
+const tabsByEventType = {
+  WEDDING: [
+    ["overview", "Overview"],
+    ["guests", "Guests"],
+    ["programme", "Programme"],
+    ["wedding", "Wedding details"],
+    ["updates", "Updates"],
+    ["team", "Event team"],
+    ["operations", "Operations"],
+  ],
+  VOTING: [
+    ["overview", "Overview"],
+    ["engage", "Contest & voting"],
+    ["updates", "Updates"],
+    ["team", "Event team"],
+    ["operations", "Operations"],
+  ],
+  GENERAL: [
+    ["overview", "Overview"],
+    ["guests", "Guests"],
+    ["programme", "Programme"],
+    ["tickets", "Tickets"],
+    ["updates", "Updates"],
+    ["team", "Event team"],
+    ["operations", "Operations"],
+  ],
+} as const;
 
 export function EventWorkspace({ user }: { user: User }) {
   const { eventId = "" } = useParams();
@@ -66,29 +49,36 @@ export function EventWorkspace({ user }: { user: User }) {
   const [tab, setTab] = useState<string>("overview");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
 
   async function load() {
     try {
       const { event: current } = await api<{ event: EventData }>(`/api/events/${eventId}`);
       setEvent(current);
-      const results = await Promise.all([
-        api<{ guests: Guest[] }>(`/api/events/${eventId}/guests`),
-        api<{ budget: WorkspaceData["budget"] }>(`/api/events/${eventId}/budget`),
-        api<{ vendors: WorkspaceData["vendors"] }>(`/api/events/${eventId}/vendors`),
-        api<{ items: WorkspaceData["registry"] }>(`/api/events/${eventId}/registry`),
-        api<{ categories: Category[] }>(`/api/events/${eventId}/categories`),
-        api<{ sessions: WorkspaceData["sessions"] }>(`/api/events/${eventId}/sessions`),
-        api<{ tiers: WorkspaceData["tiers"] }>(`/api/events/${eventId}/ticket-tiers`),
-      ]);
-      setData({
-        guests: results[0].guests,
-        budget: results[1].budget,
-        vendors: results[2].vendors,
-        registry: results[3].items,
-        categories: results[4].categories,
-        sessions: results[5].sessions,
-        tiers: results[6].tiers,
-      });
+      const nextData = { ...emptyData };
+      if (current.type === "WEDDING") {
+        const [guests, budget, vendors, registry, sessions] = await Promise.all([
+          api<{ guests: Guest[] }>(`/api/events/${eventId}/guests`),
+          api<{ budget: WorkspaceData["budget"] }>(`/api/events/${eventId}/budget`),
+          api<{ vendors: WorkspaceData["vendors"] }>(`/api/events/${eventId}/vendors`),
+          api<{ items: WorkspaceData["registry"] }>(`/api/events/${eventId}/registry`),
+          api<{ sessions: WorkspaceData["sessions"] }>(`/api/events/${eventId}/sessions`),
+        ]);
+        Object.assign(nextData, { guests: guests.guests, budget: budget.budget, vendors: vendors.vendors, registry: registry.items, sessions: sessions.sessions });
+      } else if (current.type === "VOTING") {
+        const { categories } = await api<{ categories: Category[] }>(`/api/events/${eventId}/categories`);
+        nextData.categories = categories;
+      } else {
+        const [guests, sessions, tiers] = await Promise.all([
+          api<{ guests: Guest[] }>(`/api/events/${eventId}/guests`),
+          api<{ sessions: WorkspaceData["sessions"] }>(`/api/events/${eventId}/sessions`),
+          api<{ tiers: WorkspaceData["tiers"] }>(`/api/events/${eventId}/ticket-tiers`),
+        ]);
+        Object.assign(nextData, { guests: guests.guests, sessions: sessions.sessions, tiers: tiers.tiers });
+      }
+      const eventAnalytics = await api<AnalyticsData>(`/api/events/${eventId}/analytics`);
+      setData(nextData);
+      setAnalytics(eventAnalytics);
       setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not load this event");
@@ -97,25 +87,60 @@ export function EventWorkspace({ user }: { user: User }) {
     }
   }
 
-  useEffect(() => { void load(); }, [eventId]);
+  useEffect(() => {
+    setTab("overview");
+    setLoading(true);
+    void load();
+  }, [eventId]);
 
-  const isWedding = event?.type === "WEDDING";
-  const isVoting = event?.type === "VOTING";
-  const visibleTabs = tabs.filter(([key]) => {
-    if (key === "wedding") return isWedding;
-    if (key === "engage") return isVoting;
-    return true;
-  });
+  async function togglePublication() {
+    if (!event) return;
+    try {
+      await api(`/api/events/${eventId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ isPublished: !event.isPublished }),
+      });
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not update publication");
+    }
+  }
 
-  if (loading) return <main className="loading-screen">Gathering your event details...</main>;
+  async function deleteEvent() {
+    if (!event || !window.confirm(`Delete "${event.title}"? This cannot be undone.`)) return;
+    try {
+      await api(`/api/events/${eventId}`, { method: "DELETE" });
+      window.location.assign("/dashboard");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not delete event");
+    }
+  }
+
+  const visibleTabs = event ? tabsByEventType[event.type] : tabsByEventType.WEDDING;
+  const product = event ? getEventProduct(event.type) : null;
+
+  if (loading) return <main className="loading-screen"><CubeLoader label="Details" /></main>;
   if (!event) return <main className="center-card"><div className="alert alert-error">{error || "Event not found"}</div><Link to="/dashboard" className="button button-outline">Return to workspace</Link></main>;
+
+  const activePanel = (() => {
+    if (tab === "guests" && (event.type === "WEDDING" || event.type === "GENERAL")) return <GuestsPanel eventId={event.id} data={data} onRefresh={load} />;
+    if (tab === "programme" && event.type !== "VOTING") return <ProgrammePanel eventId={event.id} data={data} onRefresh={load} />;
+    if (tab === "tickets" && event.type === "GENERAL") return <TicketsPanel eventId={event.id} event={event} data={data} onRefresh={load} />;
+    if (tab === "engage" && event.type === "VOTING") return <VotingPanel eventId={event.id} data={data} onRefresh={load} />;
+    if (tab === "wedding" && event.type === "WEDDING") return <WeddingPanel eventId={event.id} data={data} onRefresh={load} />;
+    if (tab === "updates") return <BroadcastPanel eventId={event.id} />;
+    if (tab === "team") return <BroadcastPanel eventId={event.id} team />;
+    if (tab === "operations") return <OperationsPanel eventId={event.id} />;
+    return null;
+  })();
 
   return (
     <main className="app-shell">
       <aside className="sidebar">
         <Link className="brand" to="/dashboard"><span className="brand-mark">e</span> eventflow</Link>
         <div className="side-label">EVENT SPACE</div>
-        <Link className="side-link" to="/dashboard"><span>←</span> All events</Link>
+        <Link className="side-link" to={product?.path ?? "/dashboard"}><span>←</span> {product?.name ?? "All products"}</Link>
+        <Link className="side-link" to="/dashboard"><span>↗</span> Switch product</Link>
         <div className="event-sidebar-card"><span className={`event-dot ${event.type.toLowerCase()}`} /><div><strong>{event.title}</strong><small>{event.type.replace("_", " ").toLowerCase()}</small></div></div>
         <div className="side-label side-spaced">MANAGE</div>
         {visibleTabs.map(([key, label]) => <button key={key} className={`side-link side-button ${tab === key ? "active" : ""}`} onClick={() => setTab(key)}><span>{iconForTab(key)}</span>{label}</button>)}
@@ -125,51 +150,91 @@ export function EventWorkspace({ user }: { user: User }) {
         </div>
       </aside>
       <section className="main-content">
-        <header className="topbar"><span className="breadcrumb"><Link to="/dashboard">Workspace</Link> <span>/</span> {event.title}</span><Link className="topbar-link" to={`/scanner/${event.id}`}>Open gate scanner</Link></header>
+        <header className="topbar"><span className="breadcrumb"><Link to={product?.path ?? "/dashboard"}>{product?.name ?? "Workspace"}</Link> <span>/</span> {event.title}</span>{event.type === "GENERAL" && <Link className="topbar-link" to={`/scanner/${event.id}`}>Open gate scanner</Link>}</header>
         {error && <div className="alert alert-error" role="alert">{error}</div>}
         <div className="event-workspace-heading">
           <div className={`event-cover-mark ${event.type.toLowerCase()}`}>{event.type}</div>
           <div className="event-heading-copy"><div className="eyebrow">{event.type.replace("_", " ")} · YOUR EVENT</div><h1>{event.title}</h1><p>{event.location} <span className="heading-divider">·</span> {formatDate(event.startDate)}{event.startDate !== event.endDate ? ` — ${formatDate(event.endDate)}` : ""}</p></div>
-          <a className="button button-outline" href={`/e/${event.slug}`} target="_blank" rel="noreferrer">Public page</a>
+          <div className="heading-actions">
+            <a className="button button-outline" href={`/e/${event.slug}`} target="_blank" rel="noreferrer">Public page</a>
+            <button className="button button-outline" onClick={() => void togglePublication()}>{event.isPublished ? "Unpublish" : "Publish"}</button>
+            {event.type !== "VOTING" && <a className="button button-outline" href={`/api/events/${event.id}/export/guests`} download>Export guests</a>}
+            <button className="button button-outline" onClick={() => void deleteEvent()}>Delete</button>
+          </div>
         </div>
         <nav className="workspace-tabs" aria-label="Event sections">{visibleTabs.map(([key, label]) => <button key={key} className={tab === key ? "selected" : ""} onClick={() => setTab(key)}>{label}</button>)}</nav>
-        {tab === "overview" && <Overview event={event} data={data} onSelect={setTab} />}
-        {tab === "guests" && <GuestsPanel eventId={event.id} data={data} onRefresh={load} />}
-        {tab === "programme" && <ProgrammePanel eventId={event.id} data={data} onRefresh={load} />}
-        {tab === "tickets" && <TicketsPanel eventId={event.id} event={event} data={data} onRefresh={load} />}
-        {tab === "engage" && <VotingPanel eventId={event.id} data={data} onRefresh={load} />}
-        {tab === "wedding" && <WeddingPanel eventId={event.id} data={data} onRefresh={load} />}
-        {tab === "updates" && <BroadcastPanel eventId={event.id} />}
-        {tab === "team" && <BroadcastPanel eventId={event.id} team />}
+        {event.type === "WEDDING" && <WeddingEventWorkspace event={event} data={data} analytics={analytics} tab={tab} onSelect={setTab}>{activePanel}</WeddingEventWorkspace>}
+        {event.type === "VOTING" && <VotingEventWorkspace event={event} data={data} analytics={analytics} tab={tab} onSelect={setTab}>{activePanel}</VotingEventWorkspace>}
+        {event.type === "GENERAL" && <GeneralEventWorkspace event={event} data={data} analytics={analytics} tab={tab} onSelect={setTab}>{activePanel}</GeneralEventWorkspace>}
       </section>
     </main>
   );
 }
 
-function iconForTab(tab: string): string {
-  return ({ overview: "01", guests: "02", programme: "03", tickets: "04", engage: "05", wedding: "06", updates: "07" } as Record<string, string>)[tab] ?? "00";
+function OperationsPanel({ eventId }: { eventId: string }) {
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [waitlist, setWaitlist] = useState<Array<{ id:string;name:string;email:string;phone?:string|null;notified:boolean }>>([]);
+  const [promos, setPromos] = useState<Array<{ id:string;code:string;percentOff?:string|null;amountOff?:string|null;redemptions:number;enabled:boolean }>>([]);
+  const [seats, setSeats] = useState<Array<{ id:string;section:string;row:string;number:string;reservedBy?:string|null }>>([]);
+  const [surveys, setSurveys] = useState<Array<{ id:string;title:string;isPublished:boolean;_count?:{responses:number} }>>([]);
+  const [certificates, setCertificates] = useState<Array<{ id:string;recipientName:string;title:string;issuedAt:string }>>([]);
+  const [schedules, setSchedules] = useState<Array<{ id:string;frequency:string;interval:number;timezone:string }>>([]);
+  const [invoices, setInvoices] = useState<Array<{ id:string;number:string;customerName:string;total:string;currency:string;status:string }>>([]);
+  const [promo, setPromo] = useState({ code: "", percentOff: "", amountOff: "", maxRedemptions: "" });
+  const [seat, setSeat] = useState({ section: "", row: "", number: "", reservedBy: "" });
+  const [survey, setSurvey] = useState({ title: "", description: "" });
+  const [certificate, setCertificate] = useState({ recipientName: "", recipientEmail: "", title: "" });
+  const [schedule, setSchedule] = useState({ frequency: "WEEKLY", interval: "1", timezone: "Africa/Accra" });
+  const [invoice, setInvoice] = useState({ customerName: "", customerEmail: "", description: "", unitPrice: "", quantity: "1", taxRate: "0" });
+
+  async function load() {
+    try {
+      const [waitlistResult, promoResult, seatResult, surveyResult, certificateResult, scheduleResult, invoiceResult] = await Promise.all([
+        api<{entries:typeof waitlist}>(`/api/events/${eventId}/waitlist`),
+        api<{promos:typeof promos}>(`/api/events/${eventId}/promos`),
+        api<{seats:typeof seats}>(`/api/events/${eventId}/seats`),
+        api<{surveys:typeof surveys}>(`/api/events/${eventId}/surveys`),
+        api<{certificates:typeof certificates}>(`/api/events/${eventId}/certificates`),
+        api<{schedules:typeof schedules}>(`/api/events/${eventId}/recurring`),
+        api<{invoices:typeof invoices}>(`/api/events/${eventId}/invoices`),
+      ]);
+      setWaitlist(waitlistResult.entries); setPromos(promoResult.promos); setSeats(seatResult.seats);
+      setSurveys(surveyResult.surveys); setCertificates(certificateResult.certificates);
+      setSchedules(scheduleResult.schedules); setInvoices(invoiceResult.invoices); setError("");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not load operations data"); }
+  }
+  useEffect(() => { void load(); }, [eventId]);
+
+  async function submit(path: string, body: Record<string, unknown>, success: string, reset?: () => void) {
+    setError(""); setMessage("");
+    try { await api(`/api/events/${eventId}/${path}`, { method: "POST", body: JSON.stringify(body) }); setMessage(success); reset?.(); await load(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save operation"); }
+  }
+
+  return <div className="workspace-body">
+    <div className="section-heading"><div><div className="eyebrow">EVENT OPERATIONS</div><h2>Promotions, seating, surveys & records</h2></div></div>
+    {error && <div className="alert alert-error">{error}</div>}{message && <div className="alert alert-success">{message}</div>}
+    <div className="two-column-panels">
+      <section className="content-card"><div className="eyebrow">PROMOTION</div><h3>Create a promo code</h3><form className="stack-form compact-form" onSubmit={(event) => { event.preventDefault(); void submit("promos", { code: promo.code, percentOff: promo.percentOff ? Number(promo.percentOff) : undefined, amountOff: promo.amountOff ? Number(promo.amountOff) : undefined, maxRedemptions: promo.maxRedemptions ? Number(promo.maxRedemptions) : undefined }, "Promo code created.", () => setPromo({ code: "", percentOff: "", amountOff: "", maxRedemptions: "" })); }}><label>Code<input required value={promo.code} onChange={(event) => setPromo({ ...promo, code: event.target.value })} /></label><div className="form-row"><label>Percent off<input type="number" min="0.01" max="100" step="0.01" value={promo.percentOff} onChange={(event) => setPromo({ ...promo, percentOff: event.target.value })} /></label><label>Fixed amount off<input type="number" min="0.01" step="0.01" value={promo.amountOff} onChange={(event) => setPromo({ ...promo, amountOff: event.target.value })} /></label></div><label>Maximum redemptions<input type="number" min="1" value={promo.maxRedemptions} onChange={(event) => setPromo({ ...promo, maxRedemptions: event.target.value })} /></label><button className="button button-dark">Create promo</button></form></section>
+      <section className="content-card"><div className="eyebrow">PROMO LIST</div><h3>Active promotions</h3>{promos.map((item) => <article className="admin-list-item" key={item.id}><strong>{item.code}</strong><small>{item.percentOff ? `${item.percentOff}% off` : `${item.amountOff} amount off`} · {item.redemptions} used</small></article>)}{!promos.length && <div className="empty-note">No promotion codes.</div>}</section>
+      <section className="content-card"><div className="eyebrow">SEATING</div><h3>Add a seat</h3><form className="stack-form compact-form" onSubmit={(event) => { event.preventDefault(); void submit("seats", { ...seat, reservedBy: seat.reservedBy || undefined }, "Seat added.", () => setSeat({ section: "", row: "", number: "", reservedBy: "" })); }}><div className="form-row"><label>Section<input required value={seat.section} onChange={(event) => setSeat({ ...seat, section: event.target.value })} /></label><label>Row<input required value={seat.row} onChange={(event) => setSeat({ ...seat, row: event.target.value })} /></label></div><div className="form-row"><label>Number<input required value={seat.number} onChange={(event) => setSeat({ ...seat, number: event.target.value })} /></label><label>Reserved by<input value={seat.reservedBy} onChange={(event) => setSeat({ ...seat, reservedBy: event.target.value })} /></label></div><button className="button button-outline">Add seat</button></form></section>
+      <section className="content-card"><div className="eyebrow">SEAT MAP</div><h3>Reserved seats</h3>{seats.map((item) => <article className="admin-list-item" key={item.id}><strong>{item.section} {item.row}-{item.number}</strong><small>{item.reservedBy ?? "Available"}</small></article>)}{!seats.length && <div className="empty-note">No seats configured.</div>}</section>
+      <section className="content-card"><div className="eyebrow">SURVEY</div><h3>Create a survey</h3><form className="stack-form compact-form" onSubmit={(event) => { event.preventDefault(); void submit("surveys", { title: survey.title, description: survey.description || undefined, questions: [{ type: "text", label: "Additional feedback" }], isPublished: true }, "Survey created.", () => setSurvey({ title: "", description: "" })); }}><label>Title<input required value={survey.title} onChange={(event) => setSurvey({ ...survey, title: event.target.value })} /></label><label>Description<input value={survey.description} onChange={(event) => setSurvey({ ...survey, description: event.target.value })} /></label><button className="button button-outline">Create survey</button></form></section>
+      <section className="content-card"><div className="eyebrow">SURVEY RESULTS</div><h3>Published surveys</h3>{surveys.map((item) => <article className="admin-list-item" key={item.id}><strong>{item.title}</strong><small>{item._count?.responses ?? 0} responses · {item.isPublished ? "Published" : "Draft"}</small></article>)}{!surveys.length && <div className="empty-note">No surveys created.</div>}</section>
+      <section className="content-card"><div className="eyebrow">CERTIFICATE</div><h3>Issue a certificate</h3><form className="stack-form compact-form" onSubmit={(event) => { event.preventDefault(); void submit("certificates", certificate, "Certificate issued.", () => setCertificate({ recipientName: "", recipientEmail: "", title: "" })); }}><label>Recipient name<input required value={certificate.recipientName} onChange={(event) => setCertificate({ ...certificate, recipientName: event.target.value })} /></label><label>Recipient email<input type="email" required value={certificate.recipientEmail} onChange={(event) => setCertificate({ ...certificate, recipientEmail: event.target.value })} /></label><label>Certificate title<input required value={certificate.title} onChange={(event) => setCertificate({ ...certificate, title: event.target.value })} /></label><button className="button button-outline">Issue certificate</button></form></section>
+      <section className="content-card"><div className="eyebrow">CERTIFICATE HISTORY</div><h3>Issued certificates</h3>{certificates.map((item) => <article className="admin-list-item" key={item.id}><strong>{item.title}</strong><small>{item.recipientName} · {formatDate(item.issuedAt)}</small></article>)}{!certificates.length && <div className="empty-note">No certificates issued.</div>}</section>
+      <section className="content-card"><div className="eyebrow">RECURRING SCHEDULE</div><h3>Add a schedule</h3><form className="stack-form compact-form" onSubmit={(event) => { event.preventDefault(); void submit("recurring", { frequency: schedule.frequency, interval: Number(schedule.interval), timezone: schedule.timezone }, "Recurring schedule created."); }}><div className="form-row"><label>Frequency<select value={schedule.frequency} onChange={(event) => setSchedule({ ...schedule, frequency: event.target.value })}><option>DAILY</option><option>WEEKLY</option><option>MONTHLY</option></select></label><label>Interval<input type="number" min="1" max="365" required value={schedule.interval} onChange={(event) => setSchedule({ ...schedule, interval: event.target.value })} /></label></div><label>Timezone<input required value={schedule.timezone} onChange={(event) => setSchedule({ ...schedule, timezone: event.target.value })} /></label><button className="button button-outline">Create schedule</button></form></section>
+      <section className="content-card"><div className="eyebrow">WAITLIST</div><h3>Waiting guests</h3>{waitlist.map((item) => <article className="admin-list-item" key={item.id}><strong>{item.name}</strong><small>{item.email} · {item.notified ? "Notified" : "Pending"}</small>{!item.notified && <button className="text-button" onClick={() => void api(`/api/events/${eventId}/waitlist/${item.id}/notified`, { method: "PATCH" }).then(load)}>Mark notified</button>}</article>)}{!waitlist.length && <div className="empty-note">No waiting guests.</div>}</section>
+      <section className="content-card"><div className="eyebrow">INVOICE</div><h3>Create an invoice</h3><form className="stack-form compact-form" onSubmit={(event) => { event.preventDefault(); const subtotal = Number(invoice.unitPrice) * Number(invoice.quantity); void submit("invoices", { customerName: invoice.customerName, customerEmail: invoice.customerEmail, subtotal, taxRate: Number(invoice.taxRate), currency: "GHS", lines: [{ description: invoice.description, quantity: Number(invoice.quantity), unitPrice: Number(invoice.unitPrice) }] }, "Invoice created.", () => setInvoice({ customerName: "", customerEmail: "", description: "", unitPrice: "", quantity: "1", taxRate: "0" })); }}><label>Customer name<input required value={invoice.customerName} onChange={(event) => setInvoice({ ...invoice, customerName: event.target.value })} /></label><label>Customer email<input type="email" required value={invoice.customerEmail} onChange={(event) => setInvoice({ ...invoice, customerEmail: event.target.value })} /></label><label>Line item<input required value={invoice.description} onChange={(event) => setInvoice({ ...invoice, description: event.target.value })} /></label><div className="form-row"><label>Unit price<input type="number" min="0.01" step="0.01" required value={invoice.unitPrice} onChange={(event) => setInvoice({ ...invoice, unitPrice: event.target.value })} /></label><label>Quantity<input type="number" min="1" required value={invoice.quantity} onChange={(event) => setInvoice({ ...invoice, quantity: event.target.value })} /></label></div><label>Tax rate percent<input type="number" min="0" max="100" step="0.01" value={invoice.taxRate} onChange={(event) => setInvoice({ ...invoice, taxRate: event.target.value })} /></label><button className="button button-outline">Create invoice</button></form></section>
+      <section className="content-card"><div className="eyebrow">INVOICES</div><h3>Issued invoices</h3>{invoices.map((item) => <article className="admin-list-item" key={item.id}><strong>{item.number}</strong><small>{item.customerName} · {formatMoney(item.total, item.currency)} · {item.status}</small></article>)}{!invoices.length && <div className="empty-note">No invoices issued.</div>}</section>
+      <section className="content-card"><div className="eyebrow">RECURRING LIST</div><h3>Schedules</h3>{schedules.map((item) => <article className="admin-list-item" key={item.id}><strong>{item.frequency}</strong><small>Every {item.interval} · {item.timezone}</small></article>)}{!schedules.length && <div className="empty-note">No recurring schedules.</div>}</section>
+    </div>
+  </div>;
 }
 
-function Overview({ event, data, onSelect }: { event: EventData; data: WorkspaceData; onSelect: (tab: string) => void }) {
-  const checkins = data.guests.filter((guest) => guest.checkedInAt).length;
-  return (
-    <div className="workspace-body">
-      <div className="stat-grid event-stats">
-        <div className="stat-card"><span className="stat-label">Guest list</span><strong>{data.guests.length.toString().padStart(2, "0")}</strong><small>{checkins} checked in so far</small></div>
-        <div className="stat-card"><span className="stat-label">Event duration</span><strong>{event.durationDays} <small className="inline-unit">days</small></strong><small>Inclusive calendar dates</small></div>
-        <div className="stat-card"><span className="stat-label">Platform pricing</span><strong className="stat-money">{formatMoney(event.totalCost, event.currency)}</strong><small>{formatMoney(event.dailyRate, event.currency)} per day</small></div>
-        <div className="stat-card"><span className="stat-label">Tickets reserved</span><strong>{event._count.orders.toString().padStart(2, "0")}</strong><small>Paid orders</small></div>
-      </div>
-      <div className="two-column-panels">
-        <section className="content-card"><div className="section-heading compact"><div><div className="eyebrow">KEEP THINGS MOVING</div><h2>Quick links</h2></div></div><div className="quick-links">
-          <button onClick={() => onSelect("guests")}><span className="quick-icon sage"></span><span><strong>Invite your people</strong><small>Build your guest list</small></span><b>↗</b></button>
-          <button onClick={() => onSelect(event.type === "VOTING" ? "engage" : "programme")}><span className="quick-icon peach"></span><span><strong>{event.type === "VOTING" ? "Set up the contest" : "Plan the programme"}</strong><small>Bring the details together</small></span><b>↗</b></button>
-          <button onClick={() => onSelect("tickets")}><span className="quick-icon cream">▤</span><span><strong>Set up ticketing</strong><small>Make passes easy to find</small></span><b>↗</b></button>
-        </div></section>
-        <section className="content-card"><div className="eyebrow">ON THE CALENDAR</div><h2>The when & where</h2><div className="detail-list"><div><span>Starts</span><strong>{formatDate(event.startDate)}</strong></div><div><span>Ends</span><strong>{formatDate(event.endDate)}</strong></div><div><span>Location</span><strong>{event.location}</strong></div><div><span>Public page</span><a href={`/e/${event.slug}`} target="_blank" rel="noreferrer">eventflow / {event.slug} ↗</a></div></div></section>
-      </div>
-    </div>
-  );
+function iconForTab(tab: string): string {
+  return ({ overview: "01", guests: "02", programme: "03", tickets: "04", engage: "05", wedding: "06", updates: "07", team: "08", operations: "09" } as Record<string, string>)[tab] ?? "00";
 }
 
 function GuestsPanel({ eventId, data, onRefresh }: { eventId: string; data: WorkspaceData; onRefresh: () => void }) {
@@ -199,7 +264,7 @@ function GuestsPanel({ eventId, data, onRefresh }: { eventId: string; data: Work
         <label>Email <span className="muted">(optional)</span><input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="guest@example.com" /></label>
         <div className="form-row"><label>Plus-one allowance<input type="number" min="0" max="20" value={form.plusOnes} onChange={(e) => setForm({ ...form, plusOnes: Number(e.target.value) })} /></label><label>Dietary note<input value={form.dietary} onChange={(e) => setForm({ ...form, dietary: e.target.value })} placeholder="Optional" /></label></div>
         {error && <div className="alert alert-error">{error}</div>}{result && <div className="alert alert-success">{result}</div>}
-        <button className="button button-dark" disabled={busy}>{busy ? "Sending..." : "Add guest & invite"} <span>↗</span></button>
+        <button className="button button-dark" disabled={busy}>{busy ? <CubeLoader label="Invite" compact /> : <>Add guest & invite <span>↗</span></>}</button>
       </form></section>
       <section className="content-card table-card"><div className="table-scroll"><table><thead><tr><th>GUEST</th><th>RESPONSE</th><th>PLUS-ONES</th><th>DIETARY</th></tr></thead><tbody>
         {data.guests.map((guest) => <tr key={guest.id}><td><strong>{guest.name}</strong><small>{guest.phone}</small></td><td><span className={`status-pill ${guest.status.toLowerCase()}`}>{guest.status.toLowerCase()}</span></td><td>{guest.plusOnes}</td><td>{guest.dietary || <span className="muted">—</span>}</td></tr>)}
@@ -292,17 +357,73 @@ function WeddingPanel({ eventId, data, onRefresh }: { eventId: string; data: Wor
 }
 
 function BroadcastPanel({ eventId, team = false }: { eventId: string; team?: boolean }) {
+  type ScheduledMessage = {
+    id: string;
+    message: string;
+    audience: "ALL_GUESTS" | "ATTENDING";
+    scheduledAt: string;
+    status: string;
+    sentCount: number;
+    failedCount: number;
+    skippedCount: number;
+  };
   const [message, setMessage] = useState("");
   const [result, setResult] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [schedules, setSchedules] = useState<ScheduledMessage[]>([]);
+  const [scheduledAt, setScheduledAt] = useState("");
+  const [audience, setAudience] = useState<"ALL_GUESTS" | "ATTENDING">("ALL_GUESTS");
+  const [scheduleBusy, setScheduleBusy] = useState(false);
+
+  async function loadSchedules() {
+    const data = await api<{ schedules: ScheduledMessage[] }>(`/api/events/${eventId}/message-schedules`);
+    setSchedules(data.schedules);
+  }
+
+  useEffect(() => {
+    void loadSchedules().catch((reason: unknown) =>
+      setError(reason instanceof Error ? reason.message : "Could not load scheduled messages"),
+    );
+  }, [eventId]);
+
   async function submit(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError(""); setResult("");
     try {
-      const summary = await api<{ recipients: number; sent: number; failed: number }>(`/api/events/${eventId}/broadcast`, { method: "POST", body: JSON.stringify({ message }) });
-      setResult(`Accepted by mNotify for ${summary.sent} of ${summary.recipients} guests${summary.failed ? ` · ${summary.failed} failed` : ""}.`);
+      const summary = await api<{ recipients: number; sent: number; failed: number; skipped: number }>(`/api/events/${eventId}/broadcast`, { method: "POST", body: JSON.stringify({ message }) });
+      setResult(`Accepted by mNotify for ${summary.sent} of ${summary.recipients} guests${summary.failed ? ` · ${summary.failed} failed` : ""}${summary.skipped ? ` · ${summary.skipped} opted out` : ""}.`);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not send update"); }
     finally { setBusy(false); }
+  }
+
+  async function scheduleMessage(event: FormEvent) {
+    event.preventDefault();
+    setScheduleBusy(true);
+    setError("");
+    setResult("");
+    try {
+      await api(`/api/events/${eventId}/message-schedules`, {
+        method: "POST",
+        body: JSON.stringify({ message, audience, scheduledAt: new Date(scheduledAt).toISOString() }),
+      });
+      setResult("Your SMS update is scheduled.");
+      setScheduledAt("");
+      await loadSchedules();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not schedule this update");
+    } finally {
+      setScheduleBusy(false);
+    }
+  }
+
+  async function cancelSchedule(scheduleId: string) {
+    setError("");
+    try {
+      await api(`/api/events/${eventId}/message-schedules/${scheduleId}`, { method: "DELETE" });
+      await loadSchedules();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not cancel this message");
+    }
   }
 
   function TeamPanel({ eventId }: { eventId: string }) {
@@ -336,5 +457,41 @@ function BroadcastPanel({ eventId, team = false }: { eventId: string; team?: boo
     return <div className="workspace-body"><div className="section-heading"><div><div className="eyebrow">GOOD THINGS, TOGETHER</div><h2>Your event team</h2></div></div><div className="two-column-panels"><section className="content-card"><div className="eyebrow">BRING IN YOUR PEOPLE</div><h3>Give someone event access</h3><p className="muted small-copy">Administrators create accounts first. Check-in staff can scan passes; event managers can update event details.</p><form className="stack-form compact-form" onSubmit={(event) => void addStaff(event)}><label>Team member email<input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="teammate@example.com" /></label><label>Event role<select value={role} onChange={(event) => setRole(event.target.value)}><option value="CHECK_IN_STAFF">Check-in staff</option><option value="EVENT_MANAGER">Event manager</option></select></label>{error && <div className="alert alert-error">{error}</div>}{message && <div className="alert alert-success">{message}</div>}<button className="button button-dark">Grant event access ↗</button></form></section><section className="content-card"><div className="eyebrow">THE PEOPLE BEHIND IT</div><h3>{staff.length} team {staff.length === 1 ? "member" : "members"}</h3><div className="staff-list">{staff.map((member) => <div className="staff-item" key={member.userId}><span className="avatar">{member.user.name.slice(0, 1).toUpperCase()}</span><div><strong>{member.user.name}</strong><small>{member.user.email} · {member.role.toLowerCase().replaceAll("_", " ")}</small></div><button className="text-button" onClick={() => void removeStaff(member.userId)} aria-label={`Remove ${member.user.name}`}>Remove</button></div>)}{!staff.length && <div className="empty-note">No additional team members yet.</div>}</div></section></div></div>;
   }
   if (team) return <TeamPanel eventId={eventId} />;
-  return <div className="workspace-body"><div className="section-heading"><div><div className="eyebrow">A NOTE TO YOUR PEOPLE</div><h2>Guest updates</h2></div></div><section className="content-card broadcast-card"><span className="broadcast-icon">↗</span><div className="eyebrow">SEND AN SMS UPDATE</div><h3>Keep everyone in the loop.</h3><p className="muted">Your update will go to the guests on this event’s list. Delivery results are recorded in the event SMS log.</p><form className="stack-form" onSubmit={submit}><label>Message<textarea required maxLength={1000} rows={5} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="A little update for your guests..." /><small className="muted">{message.length} / 1000 characters</small></label>{error && <div className="alert alert-error">{error}</div>}{result && <div className="alert alert-success">{result}</div>}<button className="button button-dark" disabled={busy || !message.trim()}>{busy ? "Sending..." : "Send update"} <span>↗</span></button></form></section></div>;
+  return <div className="workspace-body">
+    <div className="section-heading"><div><div className="eyebrow">A NOTE TO YOUR PEOPLE</div><h2>Guest updates</h2></div></div>
+    <section className="content-card broadcast-card">
+      <span className="broadcast-icon">↗</span>
+      <div className="eyebrow">SEND AN SMS UPDATE</div>
+      <h3>Keep everyone in the loop.</h3>
+      <p className="muted">Your update will go to the guests on this event’s list. Delivery results are recorded in the event SMS log. Guests who opted out will be skipped.</p>
+      <form className="stack-form" onSubmit={submit}>
+        <label>Message<textarea required maxLength={1000} rows={5} value={message} onChange={(event) => setMessage(event.target.value)} placeholder="A little update for your guests..." /><small className="muted">{message.length} / 1000 characters</small></label>
+        {error && <div className="alert alert-error" role="alert">{error}</div>}
+        {result && <div className="alert alert-success" role="status">{result}</div>}
+        <button className="button button-dark" disabled={busy || !message.trim()}>{busy ? <CubeLoader label="Update" compact /> : <>Send update <span>↗</span></>}</button>
+      </form>
+    </section>
+    <section className="content-card admin-form">
+      <div className="eyebrow">PLAN AHEAD</div>
+      <h3>Schedule an SMS update</h3>
+      <p className="muted small-copy">Use <code>{"{name}"}</code> and <code>{"{event}"}</code> to personalize each message. Duplicate phone numbers are only sent once.</p>
+      <form className="stack-form compact-form" onSubmit={scheduleMessage}>
+        <label>Message<textarea required maxLength={1000} rows={4} value={message} onChange={(event) => setMessage(event.target.value)} placeholder="A little update for your guests..." /></label>
+        <div className="form-row">
+          <label>Send to<select value={audience} onChange={(event) => setAudience(event.target.value as "ALL_GUESTS" | "ATTENDING")}><option value="ALL_GUESTS">All guests</option><option value="ATTENDING">Attending guests</option></select></label>
+          <label>Send at<input required type="datetime-local" value={scheduledAt} min={new Date(Date.now() + 2 * 60_000 - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 16)} onChange={(event) => setScheduledAt(event.target.value)} /></label>
+        </div>
+        <button className="button button-dark" disabled={scheduleBusy || !message.trim() || !scheduledAt}>{scheduleBusy ? <CubeLoader label="Schedule" compact /> : <>Schedule update <span>↗</span></>}</button>
+      </form>
+      <div className="admin-form">
+        <h3>Scheduled message history</h3>
+        {schedules.length ? <div className="schedule-list">{schedules.map((schedule) => <article className="admin-list-item" key={schedule.id}>
+          <strong>{new Date(schedule.scheduledAt).toLocaleString()} · {schedule.audience === "ATTENDING" ? "Attending guests" : "All guests"}</strong>
+          <small><span className={`status-pill ${schedule.status.toLowerCase()}`}>{schedule.status.toLowerCase()}</span> · {schedule.sentCount} sent · {schedule.failedCount} failed · {schedule.skippedCount} opted out</small>
+          <p>{schedule.message}</p>
+          {schedule.status === "SCHEDULED" && new Date(schedule.scheduledAt) > new Date() && <button className="text-button" onClick={() => void cancelSchedule(schedule.id)}>Cancel scheduled message</button>}
+        </article>)}</div> : <p className="muted small-copy">No messages scheduled yet.</p>}
+      </div>
+    </section>
+  </div>;
 }

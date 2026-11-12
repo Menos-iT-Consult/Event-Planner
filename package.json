@@ -8,6 +8,7 @@
     "apps/web"
   ],
   "scripts": {
+    "start": "npm run dev",
     "dev": "concurrently -k -n api,web -c blue,green \"npm:dev:api\" \"npm:dev:web\"",
     "dev:api": "npm --workspace @eventflow/api run dev",
     "dev:web": "npm --workspace @eventflow/web run dev",
@@ -17,7 +18,8 @@
     "db:generate": "npm --workspace @eventflow/api run db:generate",
     "db:migrate": "npm --workspace @eventflow/api run db:migrate",
     "db:deploy": "npm --workspace @eventflow/api run db:deploy",
-    "db:seed": "npm --workspace @eventflow/api run db:seed"
+    "db:seed": "npm --workspace @eventflow/api run db:seed",
+    "test:e2e": "playwright test -c apps/web/playwright.config.ts"
   },
   "devDependencies": {
     "@types/express": "^4.17.25",

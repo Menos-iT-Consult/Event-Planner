@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, formatDate, formatMoney } from "../api";
+import { CubeLoader } from "../components/CubeLoader";
 
 interface PublicEventData {
   id: string;
@@ -44,6 +45,10 @@ export function PublicEvent() {
   const [registrationError, setRegistrationError] = useState("");
   const [registrationSuccess, setRegistrationSuccess] = useState<{ passUrl: string; quantity: number } | null>(null);
   const [registering, setRegistering] = useState(false);
+  const [waitlist, setWaitlist] = useState({ name: "", email: "", phone: "" });
+  const [waitlistMessage, setWaitlistMessage] = useState("");
+  const [waitlistError, setWaitlistError] = useState("");
+  const [promoCode, setPromoCode] = useState("");
 
   useEffect(() => {
     api<{ event: PublicEventData }>(`/api/public/events/${slug}`)
@@ -101,6 +106,7 @@ export function PublicEvent() {
           purchaserName: checkout.name,
           purchaserEmail: checkout.email,
           purchaserPhone: checkout.phone,
+          promoCode: promoCode || undefined,
         }),
       });
       sessionStorage.setItem("eventflow_order_access", result.orderAccessUrl);
@@ -121,6 +127,7 @@ export function PublicEvent() {
           quantity: Number(paidVote.quantity),
           email: paidVote.email,
           phone: paidVote.phone,
+          promoCode: promoCode || undefined,
         }),
       });
       window.location.assign(result.authorizationUrl);
@@ -140,6 +147,22 @@ export function PublicEvent() {
       setClaimedItems((items) => [...items, itemId]);
     } catch (reason) {
       setRegistryMessage(reason instanceof Error ? reason.message : "Could not claim this gift");
+    }
+  }
+
+  async function joinWaitlist(eventForm: FormEvent) {
+    eventForm.preventDefault();
+    setWaitlistError("");
+    setWaitlistMessage("");
+    try {
+      await api(`/api/public/features/events/${slug}/waitlist`, {
+        method: "POST",
+        body: JSON.stringify(waitlist),
+      });
+      setWaitlistMessage("You have joined the waitlist. We will keep you updated.");
+      setWaitlist({ name: "", email: "", phone: "" });
+    } catch (reason) {
+      setWaitlistError(reason instanceof Error ? reason.message : "Could not join the waitlist");
     }
   }
 
@@ -170,8 +193,33 @@ export function PublicEvent() {
     }
   }
 
+  function downloadCalendar() {
+    if (!event) return;
+    const toIcsDate = (value: string) => value.slice(0, 10).replaceAll("-", "");
+    const body = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//EventFlow//Event Calendar//EN",
+      "BEGIN:VEVENT",
+      `UID:${event.slug}@eventflow`,
+      `DTSTART;VALUE=DATE:${toIcsDate(event.startDate)}`,
+      `DTEND;VALUE=DATE:${toIcsDate(event.endDate)}`,
+      `SUMMARY:${event.title.replaceAll(",", "\\,")}`,
+      `LOCATION:${event.location.replaceAll(",", "\\,")}`,
+      `DESCRIPTION:${(event.description ?? "").replaceAll("\n", "\\n").replaceAll(",", "\\,")}`,
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\r\n");
+    const url = URL.createObjectURL(new Blob([body], { type: "text/calendar;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${event.slug}.ics`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   if (error) return <main className="public-error"><Link className="brand" to="/"><span className="brand-mark">e</span> eventflow</Link><div className="center-card"><span className="eyebrow">THIS GATHERING ISN’T HERE</span><h1>{error}</h1><Link to="/" className="button button-dark">Go to EventFlow</Link></div></main>;
-  if (!event) return <main className="loading-screen">A lovely moment is on its way...</main>;
+  if (!event) return <main className="loading-screen"><CubeLoader label="Moment" /></main>;
 
   return (
     <main className="public-event-shell">
@@ -182,6 +230,7 @@ export function PublicEvent() {
         <h1>{event.title}</h1>
         {event.description && <p>{event.description}</p>}
         <div className="public-event-meta"><span>{formatDate(event.startDate)}{event.startDate !== event.endDate ? ` — ${formatDate(event.endDate)}` : ""}</span><span>{event.location}</span></div>
+        <button className="button button-outline" type="button" onClick={downloadCalendar}>Add to calendar</button>
       </header>
       <div className="public-event-content">
         {event.type === "GENERAL" && <section className="public-section registration-section">
@@ -212,12 +261,13 @@ export function PublicEvent() {
         {event.type === "VOTING" && <section className="public-section">
           <div className="eyebrow">YOUR VOICE MATTERS</div><h2>Meet the nominees</h2><p className="muted">Choose a nominee and cast one vote in each category.</p>
           <label className="voter-contact">Your phone or email<input required value={contact} onChange={(e) => setContact(e.target.value)} placeholder="+233 24 000 0000 or you@example.com" /></label>
-          {event.voteUnitPrice && <div className="paid-vote-panel"><div className="eyebrow">SUPPORT YOUR FAVORITE</div><p>Paid votes are {formatMoney(event.voteUnitPrice, event.currency)} each.</p><div className="form-row"><label>Email for secure checkout<input type="email" required value={paidVote.email} onChange={(e) => setPaidVote({ ...paidVote, email: e.target.value })} /></label><label>Phone for vote receipt<input type="tel" required value={paidVote.phone} onChange={(e) => setPaidVote({ ...paidVote, phone: e.target.value })} /></label></div><label className="paid-quantity">Number of votes<input type="number" min="1" max="100" value={paidVote.quantity} onChange={(e) => setPaidVote({ ...paidVote, quantity: Number(e.target.value) })} /></label>{paidVoteError && <div className="alert alert-error">{paidVoteError}</div>}</div>}
+          {event.voteUnitPrice && <div className="paid-vote-panel"><div className="eyebrow">SUPPORT YOUR FAVORITE</div><p>Paid votes are {formatMoney(event.voteUnitPrice, event.currency)} each.</p><div className="form-row"><label>Email for secure checkout<input type="email" required value={paidVote.email} onChange={(e) => setPaidVote({ ...paidVote, email: e.target.value })} /></label><label>Phone for vote receipt<input type="tel" required value={paidVote.phone} onChange={(e) => setPaidVote({ ...paidVote, phone: e.target.value })} /></label></div><label className="paid-quantity">Number of votes<input type="number" min="1" max="100" value={paidVote.quantity} onChange={(e) => setPaidVote({ ...paidVote, quantity: Number(e.target.value) })} /></label><label>Promotion code<input value={promoCode} onChange={(e) => setPromoCode(e.target.value.toUpperCase())} placeholder="Optional" /></label>{paidVoteError && <div className="alert alert-error">{paidVoteError}</div>}</div>}
           {voted && <div className="alert alert-success">{voted}</div>}{voteError && <div className="alert alert-error">{voteError}</div>}
           {event.categories.map((category) => <div className="public-category" key={category.id}><div className="eyebrow">CATEGORY</div><h3>{category.name}</h3><div className="candidate-grid">{category.candidates.map((candidate) => <article className="candidate-card" key={candidate.id}>{candidate.photoUrl ? <img src={candidate.photoUrl} alt="" /> : <div className="candidate-placeholder">Candidate</div>}<div><h4>{candidate.name}</h4><p>{candidate.votesCount} {candidate.votesCount === 1 ? "vote" : "votes"}</p>{candidate.description && <p>{candidate.description}</p>}<form onSubmit={(e) => void vote(e, candidate.id)}><button className="button button-outline" disabled={!contact.trim()}>Cast one free vote</button></form>{event.voteUnitPrice && <form className="paid-vote-action" onSubmit={(e) => void buyVotes(e, candidate.id)}><button className="button button-dark" disabled={payingForVotes || !paidVote.email || !paidVote.phone}>Buy {paidVote.quantity} vote{paidVote.quantity === 1 ? "" : "s"} · {formatMoney(Number(event.voteUnitPrice) * paidVote.quantity, event.currency)}</button></form>}</div></article>)}</div></div>)}
         </section>}
         {event.sessions.length > 0 && <section className="public-section"><div className="eyebrow">ON THE DAY</div><h2>The programme</h2><div className="public-session-list">{event.sessions.map((session) => <div className="public-session" key={session.id}><span>{new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(new Date(session.startsAt))}</span><div><strong>{session.title}</strong><small>{session.location || event.location}{session.speaker ? ` · ${session.speaker}` : ""}</small></div></div>)}</div></section>}
-        {event.ticketTiers.length > 0 && <section className="public-section ticket-section"><div className="eyebrow">SAVE YOUR PLACE</div><h2>Come be part of it.</h2><div className="public-ticket-grid">{event.ticketTiers.map((tier) => <div className="public-ticket" key={tier.id}><span className="eyebrow">{tier.name.toUpperCase()}</span><strong>{formatMoney(tier.price, event.currency)}</strong><small>{Math.max(0, tier.quantity - tier.sold)} places remaining</small>{tier.description && <p>{tier.description}</p>}</div>)}</div><form className="checkout-form" onSubmit={(e) => void buyTickets(e)}><label>Ticket type<select required value={checkout.tierId} onChange={(e) => setCheckout({ ...checkout, tierId: e.target.value })}>{event.ticketTiers.map((tier) => <option value={tier.id} key={tier.id}>{tier.name} · {formatMoney(tier.price, event.currency)}</option>)}</select></label><div className="form-row"><label>Your name<input required value={checkout.name} onChange={(e) => setCheckout({ ...checkout, name: e.target.value })} /></label><label>Email<input type="email" required value={checkout.email} onChange={(e) => setCheckout({ ...checkout, email: e.target.value })} /></label></div><div className="form-row"><label>Phone<input required type="tel" value={checkout.phone} onChange={(e) => setCheckout({ ...checkout, phone: e.target.value })} /></label><label>Number of tickets<input type="number" min="1" max="10" required value={checkout.quantity} onChange={(e) => setCheckout({ ...checkout, quantity: Number(e.target.value) })} /></label></div>{checkoutError && <div className="alert alert-error">{checkoutError}</div>}<button className="button button-dark" disabled={checkingOut}>{checkingOut ? "Opening secure checkout..." : "Continue to secure checkout"} <span>↗</span></button><small className="muted">Secure payments by Paystack. QR passes arrive by SMS after confirmation.</small></form></section>}
+        {event.ticketTiers.length > 0 && <section className="public-section ticket-section"><div className="eyebrow">SAVE YOUR PLACE</div><h2>Come be part of it.</h2><div className="public-ticket-grid">{event.ticketTiers.map((tier) => <div className="public-ticket" key={tier.id}><span className="eyebrow">{tier.name.toUpperCase()}</span><strong>{formatMoney(tier.price, event.currency)}</strong><small>{Math.max(0, tier.quantity - tier.sold)} places remaining</small>{tier.description && <p>{tier.description}</p>}</div>)}</div><form className="checkout-form" onSubmit={(e) => void buyTickets(e)}><label>Ticket type<select required value={checkout.tierId} onChange={(e) => setCheckout({ ...checkout, tierId: e.target.value })}>{event.ticketTiers.map((tier) => <option value={tier.id} key={tier.id}>{tier.name} · {formatMoney(tier.price, event.currency)}</option>)}</select></label><div className="form-row"><label>Your name<input required value={checkout.name} onChange={(e) => setCheckout({ ...checkout, name: e.target.value })} /></label><label>Email<input type="email" required value={checkout.email} onChange={(e) => setCheckout({ ...checkout, email: e.target.value })} /></label></div><div className="form-row"><label>Phone<input required type="tel" value={checkout.phone} onChange={(e) => setCheckout({ ...checkout, phone: e.target.value })} /></label><label>Number of tickets<input type="number" min="1" max="10" required value={checkout.quantity} onChange={(e) => setCheckout({ ...checkout, quantity: Number(e.target.value) })} /></label></div><label>Promotion code<input value={promoCode} onChange={(e) => setPromoCode(e.target.value.toUpperCase())} placeholder="Optional" /></label>{checkoutError && <div className="alert alert-error">{checkoutError}</div>}<button className="button button-dark" disabled={checkingOut}>{checkingOut ? "Opening secure checkout..." : "Continue to secure checkout"} <span>↗</span></button><small className="muted">Secure payments by Paystack. QR passes arrive by SMS after confirmation.</small></form></section>}
+        <section className="public-section"><div className="eyebrow">STAY IN THE LOOP</div><h2>Join the waitlist</h2><p className="muted">If more places become available, you will be among the first to know.</p><form className="checkout-form" onSubmit={(e) => void joinWaitlist(e)}><div className="form-row"><label>Your name<input required value={waitlist.name} onChange={(e) => setWaitlist({ ...waitlist, name: e.target.value })} /></label><label>Email<input required type="email" value={waitlist.email} onChange={(e) => setWaitlist({ ...waitlist, email: e.target.value })} /></label></div><label>Phone number<input type="tel" value={waitlist.phone} onChange={(e) => setWaitlist({ ...waitlist, phone: e.target.value })} /></label>{waitlistError && <div className="alert alert-error">{waitlistError}</div>}{waitlistMessage && <div className="alert alert-success">{waitlistMessage}</div>}<button className="button button-outline">Join waitlist</button></form></section>
         {event.registry.length > 0 && <section className="public-section"><div className="eyebrow">A THOUGHTFUL LITTLE EXTRA</div><h2>Gift registry</h2><label className="voter-contact">Your name to reserve a gift<input required value={claimerName} onChange={(e) => setClaimerName(e.target.value)} placeholder="Your name" /></label>{registryMessage && <div className="alert alert-error">{registryMessage}</div>}<div className="registry-links">{event.registry.map((item) => <div className="registry-item" key={item.id}><span>{item.url ? <a href={item.url} target="_blank" rel="noreferrer">{item.title} ↗</a> : item.title}<small>{item.price ? formatMoney(item.price, event.currency) : "A little something lovely"}</small></span><button className="button button-outline" disabled={!claimerName.trim() || claimedItems.includes(item.id)} onClick={() => void claimGift(item.id)}>{claimedItems.includes(item.id) ? "Reserved " : "I’ll bring this"}</button></div>)}</div></section>}
       </div>
       <footer className="public-event-footer"><Link className="brand" to="/"><span className="brand-mark">e</span> eventflow</Link><span>Gather well. Remember more.</span></footer>

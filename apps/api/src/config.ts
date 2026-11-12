@@ -29,6 +29,12 @@ const envSchema = z.object({
   MNOTIFY_SENDER_ID: z.string().max(11).default("EventFlow"),
   PAYSTACK_SECRET_KEY: z.string().optional(),
   PAYSTACK_CALLBACK_URL: z.string().url().default("http://localhost:5173/payment/return"),
+  SMTP_HOST: z.string().trim().min(1).optional(),
+  SMTP_PORT: z.coerce.number().int().positive().max(65535).default(587),
+  SMTP_SECURE: z.enum(["true", "false"]).transform((value) => value === "true").default("false"),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  EMAIL_FROM: z.string().trim().min(1).optional(),
 });
 
 function hasTwoDecimalPlaces(value: number): boolean {

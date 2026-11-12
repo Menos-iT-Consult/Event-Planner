@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { EventType, Prisma, UserRole } from "@prisma/client";
+import { EventType, OrderStatus, Prisma, UserRole } from "@prisma/client";
 import { z } from "zod";
 import { config } from "../config.js";
 import { prisma } from "../db.js";
@@ -16,6 +16,7 @@ import {
   type AuthenticatedRequest,
 } from "../middleware/auth.js";
 import { sendEventSms } from "../services/messaging.js";
+import { sendBroadcastSms } from "../services/sms-preferences.js";
 import { createAssetUpload } from "../services/storage.js";
 
 const createEventSchema = z.object({
@@ -171,6 +172,133 @@ eventsRouter.get(
       return;
     }
     response.json({ event });
+  }),
+);
+
+eventsRouter.patch(
+  "/:eventId",
+  requireEventAccess,
+  asyncHandler(async (request, response) => {
+    const input = z.object({
+      title: z.string().trim().min(2).max(160).optional(),
+      startDate: z.string().refine(isValidDateOnly).optional(),
+      endDate: z.string().refine(isValidDateOnly).optional(),
+      location: z.string().trim().min(2).max(240).optional(),
+      description: z.string().trim().max(5000).nullable().optional(),
+      isPublished: z.boolean().optional(),
+      bannerKey: z.string().max(500).nullable().optional(),
+      voteUnitPrice: moneySchema(0.01, 1_000_000).nullable().optional(),
+    }).parse(request.body);
+    const eventId = getRouteParam(request, "eventId");
+    const current = await prisma.event.findUnique({ where: { id: eventId } });
+    if (!current) {
+      response.status(404).json({ error: "Event not found" });
+      return;
+    }
+    const start = input.startDate ? parseDateOnly(input.startDate) : current.startDate;
+    const end = input.endDate ? parseDateOnly(input.endDate) : current.endDate;
+    if (end < start) {
+      response.status(400).json({ error: "endDate must be on or after startDate" });
+      return;
+    }
+    const durationDays = inclusiveCalendarDays(
+      start.toISOString().slice(0, 10),
+      end.toISOString().slice(0, 10),
+    );
+    const event = await prisma.event.update({
+      where: { id: eventId },
+      data: {
+        title: input.title,
+        startDate: start,
+        endDate: end,
+        durationDays,
+        totalCost: current.dailyRate.mul(durationDays),
+        location: input.location,
+        description: input.description,
+        isPublished: input.isPublished,
+        bannerKey: input.bannerKey,
+        voteUnitPrice: input.voteUnitPrice === null
+          ? null
+          : input.voteUnitPrice === undefined
+            ? undefined
+            : new Prisma.Decimal(input.voteUnitPrice),
+      },
+    });
+    response.json({ event });
+  }),
+);
+
+eventsRouter.delete(
+  "/:eventId",
+  requireEventAccess,
+  asyncHandler(async (request, response) => {
+    const user = (request as AuthenticatedRequest).user!;
+    const eventId = getRouteParam(request, "eventId");
+    if (user.role !== UserRole.ADMIN) {
+      const membership = await prisma.eventMembership.findUnique({
+        where: { userId_eventId: { userId: user.id, eventId } },
+      });
+      if (membership?.role !== UserRole.EVENT_MANAGER) {
+        response.status(403).json({ error: "Only an event manager can delete this event" });
+        return;
+      }
+    }
+    await prisma.event.delete({ where: { id: eventId } });
+    response.status(204).end();
+  }),
+);
+
+eventsRouter.get(
+  "/:eventId/analytics",
+  requireEventAccess,
+  asyncHandler(async (request, response) => {
+    const eventId = getRouteParam(request, "eventId");
+    const [guests, checkedIn, orders, ticketRevenue, voteRevenue, categories, sms] = await Promise.all([
+      prisma.guest.count({ where: { eventId } }),
+      prisma.guest.count({ where: { eventId, checkedInAt: { not: null } } }),
+      prisma.ticketOrder.count({ where: { eventId, status: OrderStatus.PAID } }),
+      prisma.ticketOrder.aggregate({ where: { eventId, status: OrderStatus.PAID }, _sum: { amount: true } }),
+      prisma.votePurchase.aggregate({ where: { eventId, status: OrderStatus.PAID }, _sum: { amount: true } }),
+      prisma.category.findMany({
+        where: { eventId },
+        include: { candidates: { select: { name: true, votesCount: true }, orderBy: { votesCount: "desc" } } },
+      }),
+      prisma.smsLog.count({ where: { eventId } }),
+    ]);
+    const ticketTotal = ticketRevenue._sum.amount ?? new Prisma.Decimal(0);
+    const voteTotal = voteRevenue._sum.amount ?? new Prisma.Decimal(0);
+    response.json({
+      guests,
+      checkedIn,
+      paidOrders: orders,
+      ticketRevenue: ticketTotal.toFixed(2),
+      voteRevenue: voteTotal.toFixed(2),
+      totalRevenue: ticketTotal.plus(voteTotal).toFixed(2),
+      smsSent: sms,
+      categories,
+    });
+  }),
+);
+
+eventsRouter.get(
+  "/:eventId/export/guests",
+  requireEventAccess,
+  asyncHandler(async (request, response) => {
+    const guests = await prisma.guest.findMany({
+      where: { eventId: getRouteParam(request, "eventId") },
+      orderBy: { createdAt: "asc" },
+    });
+    const escape = (value: unknown) => `"${String(value ?? "").replaceAll("\"", "\"\"")}"`;
+    const csv = [
+      ["Name", "Phone", "Email", "RSVP", "Plus ones", "Dietary", "Checked in"],
+      ...guests.map((guest) => [
+        guest.name, guest.phone, guest.email ?? "", guest.status,
+        guest.plusOnes, guest.dietary ?? "", guest.checkedInAt?.toISOString() ?? "",
+      ]),
+    ].map((row) => row.map(escape).join(",")).join("\r\n");
+    response.setHeader("Content-Type", "text/csv; charset=utf-8");
+    response.setHeader("Content-Disposition", "attachment; filename=\"eventflow-guests.csv\"");
+    response.send(csv);
   }),
 );
 
@@ -626,20 +754,26 @@ eventsRouter.post(
         eventId: getRouteParam(request, "eventId"),
         status: input.statuses ? { in: input.statuses } : undefined,
       },
-      select: { phone: true },
-      take: 250,
+      select: { phone: true, name: true },
+      take: 500,
     });
-    const results = [];
-    for (let index = 0; index < guests.length; index += 10) {
-      const batch = guests.slice(index, index + 10);
-      results.push(...await Promise.all(
-        batch.map((guest) => sendEventSms(getRouteParam(request, "eventId"), guest.phone, input.message)),
-      ));
+    const uniqueGuests = [...new Map(guests.map((guest) => [guest.phone, guest])).values()];
+    const results: Array<"SENT" | "FAILED" | "OPTED_OUT"> = [];
+    for (let index = 0; index < uniqueGuests.length; index += 10) {
+      const batch = uniqueGuests.slice(index, index + 10);
+      results.push(...await Promise.all(batch.map((guest) =>
+        sendBroadcastSms(
+          getRouteParam(request, "eventId"),
+          guest.phone,
+          input.message.replaceAll("{name}", guest.name),
+        ),
+      )));
     }
     response.json({
-      recipients: guests.length,
-      sent: results.filter((result) => result.status === "SENT").length,
-      failed: results.filter((result) => result.status === "FAILED").length,
+      recipients: uniqueGuests.length,
+      sent: results.filter((result) => result === "SENT").length,
+      failed: results.filter((result) => result === "FAILED").length,
+      skipped: results.filter((result) => result === "OPTED_OUT").length,
     });
   }),
 );

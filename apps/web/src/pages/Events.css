@@ -1,0 +1,14 @@
+.directory-search { display: grid; grid-template-columns: minmax(180px, 1fr) 220px auto; gap: 12px; margin-bottom: 28px; }
+.directory-search input, .directory-search select { width: 100%; min-height: 46px; padding: 10px 12px; border: 1px solid #dfe3da; border-radius: 6px; background: var(--paper); color: var(--ink); font-size: 12px; }
+.directory-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 17px; padding-bottom: 62px; }
+.directory-card { overflow: hidden; border: 1px solid #e7e8e0; border-radius: 7px; background: var(--paper); transition: transform .2s, box-shadow .2s; }
+.directory-card:hover { transform: translateY(-2px); box-shadow: 0 12px 30px #23332d12; color: inherit; }
+.directory-card-body { display: flex; min-height: 150px; flex-direction: column; padding: 16px; }
+.directory-card-body h2 { margin: 0 0 8px; color: #32473a; font-family: var(--serif); font-size: 22px; font-weight: 400; }
+.directory-card-body p { margin: 4px 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.directory-card-body small { margin-bottom: 8px; color: #718076; font-size: 9px; font-weight: 600; }
+@media (max-width: 760px) {
+  .directory-search { grid-template-columns: 1fr; }
+  .directory-search .button { width: 100%; }
+  .directory-grid { grid-template-columns: 1fr; }
+}

@@ -1,12 +1,13 @@
 import type { ErrorRequestHandler, RequestHandler } from "express";
 import { Prisma } from "@prisma/client";
 import { ZodError } from "zod";
+import { logEvent } from "../lib/logger.js";
 
 export const notFound: RequestHandler = (_request, response) => {
   response.status(404).json({ error: "Not found" });
 };
 
-export const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => {
+export const errorHandler: ErrorRequestHandler = (error, request, response, _next) => {
   if (
     typeof error === "object" &&
     error !== null &&
@@ -53,6 +54,12 @@ export const errorHandler: ErrorRequestHandler = (error, _request, response, _ne
     return;
   }
 
-  console.error("Unhandled API error", error);
-  response.status(500).json({ error: "Internal server error" });
+  const requestId = response.locals.requestId as string | undefined;
+  logEvent("error", "http.unhandled_error", {
+    requestId,
+    method: request.method,
+    route: request.route?.path ? `${request.baseUrl}${String(request.route.path)}` : "unmatched",
+    error,
+  });
+  response.status(500).json({ error: "Internal server error", requestId });
 };

@@ -16,6 +16,7 @@ import { AboutPage, ContactPage, EventsPage, HelpPage, PricingPage, PrivacyPage,
 import { CubeLoader } from "./components/CubeLoader";
 import { SmsOptOut } from "./pages/SmsOptOut";
 import { ProductLanding } from "./pages/ProductLanding";
+import { AdminPanel } from "./pages/AdminPanel";
 import { eventProducts, getProductReturnPath } from "./products";
 
 export interface User {
@@ -80,6 +81,10 @@ export function App() {
       <Route
         path="/events/:eventId"
         element={user ? <EventWorkspace user={user} /> : <Navigate to="/login" replace />}
+      />
+      <Route
+        path="/admin"
+        element={user?.role === "ADMIN" ? <AdminPanel user={user} /> : <Navigate to={user ? "/dashboard" : "/login"} replace />}
       />
       <Route path="/dashboard" element={user ? <Dashboard user={user} onLogout={() => setUser(null)} /> : <Navigate to="/login" replace />} />
       {eventProducts.map((product) => (

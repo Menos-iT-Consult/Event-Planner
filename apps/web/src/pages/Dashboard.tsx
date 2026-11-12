@@ -3,7 +3,6 @@ import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { User } from "../App";
 import { api, formatDate, formatMoney } from "../api";
-import { AdminPanel } from "./AdminPanel";
 import { CubeLoader } from "../components/CubeLoader";
 import { eventProducts, getEventProduct } from "../products";
 
@@ -29,7 +28,6 @@ const eventLabels = {
 export function Dashboard({ user, onLogout, eventType }: { user: User; onLogout: () => void; eventType?: EventItem["type"] }) {
   const [events, setEvents] = useState<EventItem[]>([]);
   const [showCreate, setShowCreate] = useState(false);
-  const [showAdmin, setShowAdmin] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
@@ -90,6 +88,7 @@ export function Dashboard({ user, onLogout, eventType }: { user: User; onLogout:
         <div className="side-label">PRODUCTS</div>
         <Link className={`side-link ${!product ? "active" : ""}`} to="/dashboard"><span>00</span> Product home</Link>
         {eventProducts.map((item, index) => <Link className={`side-link ${product?.type === item.type ? "active" : ""}`} key={item.type} to={item.path}><span>{String(index + 1).padStart(2, "0")}</span>{item.name}</Link>)}
+        {user.role === "ADMIN" && <Link className="side-link" to="/admin"><span>AD</span> Central admin</Link>}
         {product && <>
           <div className="side-label side-spaced">YOUR {product.name.toUpperCase()}</div>
           {productEvents.slice(0, 5).map((event) => <Link className="side-link side-event" key={event.id} to={user.role === "CHECK_IN_STAFF" ? `/scanner/${event.id}` : `/events/${event.id}`}><span className={`event-dot ${event.type.toLowerCase()}`} />{event.title}</Link>)}
@@ -107,7 +106,7 @@ export function Dashboard({ user, onLogout, eventType }: { user: User; onLogout:
         <header className="topbar"><span className="breadcrumb">EventFlow <span>/</span> {product?.name ?? "Product home"}</span><span className="today-label">{new Intl.DateTimeFormat(undefined, { dateStyle: "full" }).format(new Date())}</span></header>
         <div className="page-heading">
           <div><div className="eyebrow">{product ? product.name.toUpperCase() : "YOUR EVENTFLOW WORKSPACE"}</div><h1>Good morning, {user.name.split(" ")[0]}</h1><p>{product ? product.description : "Choose a dedicated workspace for the kind of event you’re planning."}</p></div>
-          <div className="heading-actions">{user.role === "ADMIN" && <button className="button button-outline" onClick={() => setShowAdmin(true)}>Platform</button>}{product && user.role !== "CHECK_IN_STAFF" && <button className="button button-dark" onClick={() => setShowCreate(true)}>New {product.eventName}</button>}</div>
+          <div className="heading-actions">{user.role === "ADMIN" && <Link className="button button-outline" to="/admin">Central admin</Link>}{product && user.role !== "CHECK_IN_STAFF" && <button className="button button-dark" onClick={() => setShowCreate(true)}>New {product.eventName}</button>}</div>
         </div>
         {error && <div className="alert alert-error" role="alert">{error}</div>}
         {!product ? <section className="product-hub">
@@ -151,7 +150,6 @@ export function Dashboard({ user, onLogout, eventType }: { user: User; onLogout:
         </>}
       </section>
       {showCreate && product && <CreateEvent eventType={product.type} onClose={() => setShowCreate(false)} onCreated={(id) => navigate(`/events/${id}`)} />}
-      {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}
     </main>
   );
 }

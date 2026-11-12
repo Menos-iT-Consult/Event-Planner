@@ -187,6 +187,72 @@ test("event manager can create an event", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Ama & Kofi Wedding" })).toBeVisible();
 });
 
+test("platform administrators can open the central control center", async ({ page }) => {
+  test.setTimeout(60_000);
+  const user = { id: "admin-1", name: "Amina Mensah", email: "admin@example.com", role: "ADMIN" };
+  await page.route("**/api/auth/me", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ user }) }),
+  );
+  const responses: Record<string, unknown> = {
+    settings: { settings: [
+      { key: "WEDDING_DAILY_RATE", value: "10", description: "Wedding rate" },
+      { key: "VOTING_DAILY_RATE", value: "15", description: "Voting rate" },
+      { key: "GENERAL_DAILY_RATE", value: "20", description: "General rate" },
+    ] },
+    overview: {
+      events: 3,
+      guests: 42,
+      votes: 88,
+      paidOrders: 9,
+      contactMessages: 1,
+      staff: 4,
+      revenue: "1250.00",
+      byType: [
+        { type: "WEDDING", _count: { _all: 1 } },
+        { type: "VOTING", _count: { _all: 1 } },
+        { type: "GENERAL", _count: { _all: 1 } },
+      ],
+    },
+    contact: { messages: [] },
+    audit: { logs: [] },
+    organizations: { organizations: [{ id: "org-1", name: "EventFlow", slug: "eventflow", _count: { users: 4 } }] },
+    "features/refunds": { refunds: [] },
+    "features/jobs": { jobs: [] },
+    "features/provider-health": {
+      providers: { database: "ready", sms: "ready", payments: "not_configured", objectStorage: "ready", email: "not_configured" },
+      history: {},
+      operations: { smsFailures: 0, failedJobs: 0, deadJobs: 0, pendingJobs: 0, deletionRequests: 0 },
+    },
+    "features/data-deletion-requests": { requests: [] },
+    users: { users: [{ id: "admin-1", name: user.name, email: user.email, role: user.role, emailVerifiedAt: "2026-01-01T00:00:00.000Z", createdAt: "2026-01-01T00:00:00.000Z" }] },
+  };
+  await page.route(/\/api\/admin\//, async (route) => {
+    const path = new URL(route.request().url()).pathname.split("/").filter(Boolean).slice(2);
+    const key = path[0] === "features" ? `features/${path[1]}` : path[0];
+    const body = responses[key];
+    if (!body) {
+      await route.fulfill({ status: 404, contentType: "application/json", body: '{"error":"Unknown admin endpoint"}' });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+  });
+
+  await page.goto("/admin", { waitUntil: "domcontentloaded" });
+  await expect(page.getByRole("heading", { name: "Platform overview" })).toBeVisible();
+  await expect(page.getByText("Events on platform")).toBeVisible();
+  await expect(page.getByText("Recorded revenue")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Events by type" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connected services" })).toBeVisible();
+
+  await page.getByRole("button", { name: "People" }).click();
+  await expect(page.getByRole("heading", { name: "Create a platform account" })).toBeVisible();
+  await expect(page.getByText("admin@example.com")).toBeVisible();
+
+  await page.getByRole("button", { name: "Operations" }).click();
+  await expect(page.getByRole("heading", { name: "Contact inbox" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Audit history" })).toBeVisible();
+});
+
 test("each event type opens its own event workspace components and data", async ({ page }) => {
   const user = { id: "manager-1", name: "Amina Mensah", email: "amina@example.com", role: "EVENT_MANAGER" };
   await page.route("**/api/auth/me", (route) =>

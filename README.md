@@ -63,7 +63,7 @@ The repository deploys as two services defined in `vercel.json`:
 
 - `api` builds from `apps/api` and is publicly routed at `/api/*` and `/health`.
 - `web` builds from `apps/web` and is publicly routed at `/*`.
-- The API entrypoint is an ES module; `apps/api/src/package.json` keeps Vercel's generated `src/app.js` in the ESM module scope.
+- The API compiles to CommonJS so Vercel's generated `src/app.js` runs without relying on package-level ESM metadata.
 
 Configure these environment variables in the Vercel project and expose them to both services:
 

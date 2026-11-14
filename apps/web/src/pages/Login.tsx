@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import type { User } from "../App";
 import { api } from "../api";
 import { CubeLoader } from "../components/CubeLoader";
+import { PasswordInput } from "../components/PasswordInput";
 import { getProductReturnPath } from "../products";
 
 export function Login({ onLogin }: { onLogin: (user: User) => void }) {
@@ -59,7 +60,7 @@ export function Login({ onLogin }: { onLogin: (user: User) => void }) {
           <form onSubmit={submit} className="stack-form">
             {oidcEnabled && <a className="button button-outline" href={`/api/auth/oidc/start?next=${encodeURIComponent(returnTo)}`}>Continue with organization SSO</a>}
             <label>Email address<input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" /></label>
-            <label>Password<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Your password" /></label>
+            <label>Password<PasswordInput autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Your password" /></label>
             {error && <div className="alert alert-error" role="alert">{error}</div>}
             <button className="button button-dark" type="submit" disabled={busy}>{busy ? <CubeLoader label="Sign in" compact /> : "Sign in"}</button>
             <Link className="text-button account-page-link" to="/forgot-password">Forgot password?</Link>

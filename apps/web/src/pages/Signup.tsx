@@ -4,6 +4,7 @@ import { Link, useLocation } from "react-router-dom";
 import type { User } from "../App";
 import { api } from "../api";
 import { CubeLoader } from "../components/CubeLoader";
+import { PasswordInput } from "../components/PasswordInput";
 import { getProductReturnPath } from "../products";
 import "./Signup.css";
 
@@ -54,8 +55,8 @@ export function Signup({ onSignup }: { onSignup: (user: User) => void }) {
           <form onSubmit={submit} className="stack-form">
             <label>Your name<input required minLength={2} maxLength={120} autoComplete="name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
             <label>Email address<input required type="email" autoComplete="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
-            <label>Password<input required minLength={8} maxLength={200} type="password" autoComplete="new-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></label>
-            <label>Confirm password<input required minLength={8} maxLength={200} type="password" autoComplete="new-password" value={form.confirmPassword} onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })} /></label>
+            <label>Password<PasswordInput required minLength={8} maxLength={200} autoComplete="new-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></label>
+            <label>Confirm password<PasswordInput required minLength={8} maxLength={200} autoComplete="new-password" value={form.confirmPassword} onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })} /></label>
             <small className="muted">Use at least 8 characters.</small>
             {error && <div className="alert alert-error" role="alert">{error}</div>}
             <button className="button button-dark button-wide" disabled={busy}>{busy ? <CubeLoader label="Account" compact /> : "Create account"}</button>

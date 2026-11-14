@@ -386,6 +386,12 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .stack-form textarea { resize: vertical; }
 .stack-form input:focus, .stack-form textarea:focus, .stack-form select:focus, .checkout-form input:focus, .checkout-form select:focus { border-color: #8ca991; }
 .stack-form input::placeholder, .stack-form textarea::placeholder, .scanner-manual input::placeholder { color: #a4aaa2; }
+.password-input-wrap { position: relative; display: block; width: 100%; }
+.password-input-wrap > input.password-input { padding-right: 44px; }
+.password-reveal-toggle { position: absolute; top: 50%; right: 7px; display: grid; width: 32px; height: 32px; place-items: center; padding: 0; transform: translateY(-50%); border: 0; border-radius: 4px; background: transparent; color: #78837b; }
+.password-reveal-toggle:hover { background: #edf2eb; color: #405248; }
+.password-reveal-toggle:focus-visible { outline: 2px solid #8ca991; outline-offset: 1px; }
+.password-reveal-toggle svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
 .login-form-wrap .button { min-height: 48px; margin-top: 5px; }
 .login-note { margin-top: 23px !important; color: #8b948d; font-size: 10px !important; text-align: center; }
 
@@ -393,6 +399,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .app-shell { display: flex; min-height: 100vh; background: #f7f7f2; }
 .sidebar { position: fixed; z-index: 10; display: flex; width: 246px; height: 100vh; flex-direction: column; padding: 27px 17px 17px; border-right: 1px solid #e8e9e1; background: #fbfbf7; }
 .sidebar > .brand { margin: 0 0 44px 9px; }
+.mobile-menu-toggle { display: none; }
 .side-label { margin: 0 0 12px 10px; color: #929b93; font-size: 8px; font-weight: 700; letter-spacing: 1.4px; }
 .side-spaced { margin-top: 30px; }
 .side-link { display: flex; min-height: 39px; align-items: center; gap: 11px; padding: 0 10px; border-radius: 5px; color: #657169; font-size: 11px; }
@@ -815,13 +822,21 @@ td:first-child small { margin-top: 4px; color: #8b948d; font-size: 8px; }
   .login-art-shapes { right: 12%; bottom: 17%; font-size: 22px; }
   .login-art-foot { display: none; }
   .login-content { padding: 42px 23px; }
-  .sidebar { position: static; width: 100%; height: auto; flex-direction: row; align-items: center; gap: 8px; padding: 9px 15px; border-right: 0; border-bottom: 1px solid #e8e9e1; }
+  .sidebar { position: sticky; top: 0; z-index: 20; width: 100%; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; padding: 9px 15px; border-right: 0; border-bottom: 1px solid #e8e9e1; }
   .sidebar > .brand { margin: 0 auto 0 0; font-size: 15px; }
   .sidebar > .brand .brand-mark { width: 24px; height: 24px; }
-  .sidebar .side-label, .sidebar > .side-link, .sidebar .event-sidebar-card, .sidebar .side-add { display: none; }
-  .sidebar-bottom { flex-direction: row; align-items: center; gap: 12px; margin: 0; padding: 0; border: 0; }
-  .sidebar-bottom .user-chip > span:last-child, .sidebar-bottom .text-button { display: none; }
-  .sidebar-bottom .avatar { width: 27px; height: 27px; }
+  .mobile-menu-toggle { display: inline-grid; width: 40px; height: 40px; flex: 0 0 40px; place-items: center; padding: 0; border: 1px solid #e1e6dd; border-radius: 6px; background: #fffefa; color: #405248; cursor: pointer; }
+  .mobile-menu-toggle svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 1.8; }
+  .mobile-menu-toggle:focus-visible { outline: 2px solid #78947c; outline-offset: 2px; }
+  .sidebar .side-label, .sidebar > .side-link, .sidebar .event-sidebar-card, .sidebar .side-add, .sidebar-bottom { display: none; }
+  .sidebar.mobile-open { align-items: stretch; box-shadow: 0 8px 18px rgba(32, 52, 44, .08); }
+  .sidebar.mobile-open .side-label { display: block; width: 100%; margin: 12px 0 4px; }
+  .sidebar.mobile-open > .side-link, .sidebar.mobile-open .event-sidebar-card, .sidebar.mobile-open .side-add { display: flex; width: 100%; }
+  .sidebar.mobile-open .side-add { min-height: 36px; align-items: center; margin: 4px 0; }
+  .sidebar.mobile-open .sidebar-bottom { display: flex; width: 100%; flex-direction: column; align-items: stretch; gap: 10px; margin: 8px 0 0; padding: 12px 0 0; border-top: 1px solid #e8e9e1; }
+  .sidebar.mobile-open .sidebar-bottom .user-chip > span:last-child { display: flex; }
+  .sidebar.mobile-open .sidebar-bottom .text-button { display: inline-flex; min-height: 34px; align-items: center; }
+  .sidebar.mobile-open .sidebar-bottom .avatar { width: 29px; height: 29px; }
   .app-shell { display: flex; flex-direction: column; }
   .main-content { width: 100%; margin: 0; padding: 0 17px 40px; }
   .topbar { height: 48px; }
@@ -850,11 +865,10 @@ td:first-child small { margin-top: 4px; color: #8b948d; font-size: 8px; }
   .admin-metric-grid .stat-highlight { grid-column: span 2; }
   .admin-user-row { grid-template-columns: 29px minmax(0, 1fr) auto !important; }
   .admin-user-row > small { grid-column: 2 / -1; }
-  .admin-dashboard-shell .sidebar { height: auto; flex-wrap: wrap; justify-content: flex-start; }
-  .admin-dashboard-shell .sidebar .side-label { display: none; }
-  .admin-dashboard-shell .sidebar > .side-button { display: flex; width: auto; min-height: 32px; padding: 0 8px; font-size: 9px; }
-  .admin-dashboard-shell .sidebar > .side-link { display: none; }
-  .admin-dashboard-shell .sidebar-bottom { display: none; }
+  .admin-dashboard-shell .sidebar .side-label, .admin-dashboard-shell .sidebar > .side-button, .admin-dashboard-shell .sidebar > .side-link, .admin-dashboard-shell .sidebar-bottom { display: none; }
+  .admin-dashboard-shell .sidebar.mobile-open .side-label { display: block; }
+  .admin-dashboard-shell .sidebar.mobile-open > .side-button, .admin-dashboard-shell .sidebar.mobile-open > .side-link { display: flex; width: 100%; min-height: 39px; padding: 0 10px; font-size: 11px; }
+  .admin-dashboard-shell .sidebar.mobile-open .sidebar-bottom { display: flex; }
   .admin-dashboard-shell .admin-metric-grid .stat-card { min-height: 112px; }
   .admin-queue-grid > button { padding: 10px; }
   .registry-card { grid-column: auto; }

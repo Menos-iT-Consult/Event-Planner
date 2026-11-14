@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import type { User } from "../App";
 import { api, formatDate, formatMoney } from "../api";
 import { CubeLoader } from "../components/CubeLoader";
+import { MobileMenuButton } from "../components/MobileMenuButton";
 import { getEventProduct } from "../products";
 import { GeneralEventWorkspace } from "./GeneralEventWorkspace";
 import { VotingEventWorkspace } from "./VotingEventWorkspace";
@@ -51,6 +52,7 @@ export function EventWorkspace({ user }: { user: User }) {
   const [event, setEvent] = useState<EventData | null>(null);
   const [data, setData] = useState(emptyData);
   const [tab, setTab] = useState<string>("overview");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
@@ -143,17 +145,18 @@ export function EventWorkspace({ user }: { user: User }) {
 
   return (
     <main className="app-shell">
-      <aside className="sidebar">
-        <Link className="brand" to="/dashboard"><span className="brand-mark">e</span> eventflow</Link>
+      <aside className={`sidebar${mobileMenuOpen ? " mobile-open" : ""}`} id="workspace-navigation">
+        <Link className="brand" to="/dashboard" onClick={() => setMobileMenuOpen(false)}><span className="brand-mark">e</span> eventflow</Link>
+        <MobileMenuButton open={mobileMenuOpen} onClick={() => setMobileMenuOpen((open) => !open)} controls="workspace-navigation" />
         <div className="side-label">EVENT SPACE</div>
-        <Link className="side-link" to={product?.path ?? "/dashboard"}><span>←</span> {product?.name ?? "All products"}</Link>
-        <Link className="side-link" to="/dashboard"><span>↗</span> Switch product</Link>
+        <Link className="side-link" to={product?.path ?? "/dashboard"} onClick={() => setMobileMenuOpen(false)}><span>←</span> {product?.name ?? "All products"}</Link>
+        <Link className="side-link" to="/dashboard" onClick={() => setMobileMenuOpen(false)}><span>↗</span> Switch product</Link>
         <div className="event-sidebar-card"><span className={`event-dot ${event.type.toLowerCase()}`} /><div><strong>{event.title}</strong><small>{event.type.replace("_", " ").toLowerCase()}</small></div></div>
         <div className="side-label side-spaced">MANAGE</div>
-        {visibleTabs.map(([key, label]) => <button key={key} className={`side-link side-button ${tab === key ? "active" : ""}`} onClick={() => setTab(key)}><span>{iconForTab(key)}</span>{label}</button>)}
+        {visibleTabs.map(([key, label]) => <button key={key} className={`side-link side-button ${tab === key ? "active" : ""}`} onClick={() => { setTab(key); setMobileMenuOpen(false); }}><span>{iconForTab(key)}</span>{label}</button>)}
         <div className="sidebar-bottom">
           <div className="user-chip"><span className="avatar">{user.name.slice(0, 1).toUpperCase()}</span><span><strong>{user.name}</strong><small>{user.role.replaceAll("_", " ").toLowerCase()}</small></span></div>
-          <Link className="text-button" to={`/e/${event.slug}`} target="_blank" rel="noreferrer">View public page</Link>
+          <Link className="text-button" to={`/e/${event.slug}`} target="_blank" rel="noreferrer" onClick={() => setMobileMenuOpen(false)}>View public page</Link>
         </div>
       </aside>
       <section className="main-content">
@@ -169,7 +172,7 @@ export function EventWorkspace({ user }: { user: User }) {
             <button className="button button-outline" onClick={() => void deleteEvent()}>Delete</button>
           </div>
         </div>
-        <nav className="workspace-tabs" aria-label="Event sections">{visibleTabs.map(([key, label]) => <button key={key} className={tab === key ? "selected" : ""} onClick={() => setTab(key)}>{label}</button>)}</nav>
+        <nav className="workspace-tabs" aria-label="Event sections">{visibleTabs.map(([key, label]) => <button key={key} className={tab === key ? "selected" : ""} onClick={() => { setTab(key); setMobileMenuOpen(false); }}>{label}</button>)}</nav>
         {event.type === "WEDDING" && <WeddingEventWorkspace event={event} data={data} analytics={analytics} tab={tab} onSelect={setTab}>{activePanel}</WeddingEventWorkspace>}
         {event.type === "VOTING" && <VotingEventWorkspace event={event} data={data} analytics={analytics} tab={tab} onSelect={setTab}>{activePanel}</VotingEventWorkspace>}
         {event.type === "GENERAL" && <GeneralEventWorkspace event={event} data={data} analytics={analytics} tab={tab} onSelect={setTab}>{activePanel}</GeneralEventWorkspace>}

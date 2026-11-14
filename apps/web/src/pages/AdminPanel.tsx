@@ -4,6 +4,8 @@ import { Link } from "react-router-dom";
 import type { User } from "../App";
 import { api, formatMoney } from "../api";
 import { CubeLoader } from "../components/CubeLoader";
+import { MobileMenuButton } from "../components/MobileMenuButton";
+import { PasswordInput } from "../components/PasswordInput";
 
 interface Setting {
   key: string;
@@ -64,6 +66,7 @@ const adminSections: Array<{ id: AdminSection; label: string; number: string }> 
 
 export function AdminPanel({ user: adminUser }: { user: User }) {
   const [section, setSection] = useState<AdminSection>("overview");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [settings, setSettings] = useState<Setting[]>([]);
   const [subscriptionPlans, setSubscriptionPlans] = useState<SubscriptionPlan[]>([]);
@@ -284,16 +287,17 @@ export function AdminPanel({ user: adminUser }: { user: User }) {
   const providerCount = Object.keys(providerHealth?.providers ?? {}).length;
 
   return <main className="app-shell admin-dashboard-shell">
-    <aside className="sidebar">
-      <Link className="brand" to="/dashboard"><span className="brand-mark">e</span> eventflow</Link>
+    <aside className={`sidebar${mobileMenuOpen ? " mobile-open" : ""}`} id="workspace-navigation">
+      <Link className="brand" to="/dashboard" onClick={() => setMobileMenuOpen(false)}><span className="brand-mark">e</span> eventflow</Link>
+      <MobileMenuButton open={mobileMenuOpen} onClick={() => setMobileMenuOpen((open) => !open)} controls="workspace-navigation" />
       <div className="side-label">CONTROL CENTER</div>
-      {adminSections.map((item) => <button key={item.id} className={`side-link side-button ${section === item.id ? "active" : ""}`} onClick={() => setSection(item.id)}><span>{item.number}</span>{item.label}</button>)}
+      {adminSections.map((item) => <button key={item.id} className={`side-link side-button ${section === item.id ? "active" : ""}`} onClick={() => { setSection(item.id); setMobileMenuOpen(false); }}><span>{item.number}</span>{item.label}</button>)}
       <div className="side-label side-spaced">PRODUCTS</div>
-      <Link className="side-link" to="/dashboard"><span>↗</span> Product home</Link>
-      <Link className="side-link" to="/organizations"><span>OR</span> Organizations</Link>
+      <Link className="side-link" to="/dashboard" onClick={() => setMobileMenuOpen(false)}><span>↗</span> Product home</Link>
+      <Link className="side-link" to="/organizations" onClick={() => setMobileMenuOpen(false)}><span>OR</span> Organizations</Link>
       <div className="sidebar-bottom">
         <div className="user-chip"><span className="avatar">{adminUser.name.slice(0, 1).toUpperCase()}</span><span><strong>{adminUser.name}</strong><small>Platform admin</small></span></div>
-        <Link className="text-button" to="/dashboard">Return to workspace</Link>
+        <Link className="text-button" to="/dashboard" onClick={() => setMobileMenuOpen(false)}>Return to workspace</Link>
       </div>
     </aside>
     <section className="main-content">
@@ -363,7 +367,7 @@ export function AdminPanel({ user: adminUser }: { user: User }) {
           <section className="content-card admin-service-detail"><div className="eyebrow">SERVICE DIAGNOSTICS</div><h2>Provider health</h2>{providerHealth ? <><div className="provider-grid">{Object.entries(providerHealth.providers).map(([name, status]) => <article className="admin-list-item" key={name}><strong>{name.replace(/([A-Z])/g, " $1")}</strong><small className={`health-label ${status}`}>{status.replaceAll("_", " ")}</small></article>)}</div><div className="stat-grid">{Object.entries(providerHealth.operations).map(([name, value]) => <div className="stat-card" key={name}><span className="stat-label">{name.replaceAll(/([A-Z])/g, " $1")}</span><strong>{value}</strong></div>)}</div><h3>Recent provider checks</h3>{Object.entries(providerHealth.history).map(([provider, checks]) => <div className="admin-list-item" key={provider}><strong>{provider}</strong>{checks.map((check, index) => <small key={`${check.checkedAt}-${index}`}>{check.status.replaceAll("_", " ")} · {check.details} · <time dateTime={check.checkedAt}>{new Date(check.checkedAt).toLocaleString()}</time></small>)}</div>)}<p className="muted small-copy">Provider readiness reflects configuration and database connectivity, not a live delivery test.</p></> : <CubeLoader label="Providers" />}</section>
         </div>}
         {section === "people" && <div className="admin-section-grid">
-          <form className="content-card stack-form" onSubmit={createUser}><div className="eyebrow">ACCESS MANAGEMENT</div><h2>Create a platform account</h2><label>Full name<input required value={user.name} onChange={(event) => setUser({ ...user, name: event.target.value })} /></label><label>Email<input type="email" required value={user.email} onChange={(event) => setUser({ ...user, email: event.target.value })} /></label><label>Temporary password<input type="password" minLength={8} required value={user.password} onChange={(event) => setUser({ ...user, password: event.target.value })} /><small className="muted">At least 8 characters. Share securely.</small></label><label>Role<select value={user.role} onChange={(event) => setUser({ ...user, role: event.target.value })}><option value="EVENT_MANAGER">Event manager</option><option value="CHECK_IN_STAFF">Check-in staff</option><option value="ADMIN">Platform administrator</option></select></label><button className="button button-dark">Create account</button></form>
+          <form className="content-card stack-form" onSubmit={createUser}><div className="eyebrow">ACCESS MANAGEMENT</div><h2>Create a platform account</h2><label>Full name<input required value={user.name} onChange={(event) => setUser({ ...user, name: event.target.value })} /></label><label>Email<input type="email" required value={user.email} onChange={(event) => setUser({ ...user, email: event.target.value })} /></label><label>Temporary password<PasswordInput minLength={8} required value={user.password} onChange={(event) => setUser({ ...user, password: event.target.value })} /><small className="muted">At least 8 characters. Share securely.</small></label><label>Role<select value={user.role} onChange={(event) => setUser({ ...user, role: event.target.value })}><option value="EVENT_MANAGER">Event manager</option><option value="CHECK_IN_STAFF">Check-in staff</option><option value="ADMIN">Platform administrator</option></select></label><button className="button button-dark">Create account</button></form>
           <section className="content-card admin-user-directory"><div className="eyebrow">ACCOUNT DIRECTORY</div><h2>{users.length} platform {users.length === 1 ? "account" : "accounts"}</h2><div className="admin-directory-list">{users.map((item) => <article className="admin-list-item admin-user-row" key={item.id}><span className="avatar">{item.name.slice(0, 1).toUpperCase()}</span><span><strong>{item.name}</strong><small>{item.email} · {item.organization?.name ?? "No organization"}</small></span><span className="status-pill">{item.role.replaceAll("_", " ").toLowerCase()}</span><small>{item.emailVerifiedAt ? "Verified" : "Unverified"}</small></article>)}{!users.length && <div className="empty-note">No accounts available.</div>}</div></section>
         </div>}
         {section === "operations" && <div className="admin-operations-grid">

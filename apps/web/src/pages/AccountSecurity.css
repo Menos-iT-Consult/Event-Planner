@@ -6,6 +6,9 @@
 .setup-key { display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px solid #dfe3da; border-radius: 7px; background: #f7f7f2; }
 .setup-key span { color: var(--muted); font-size: 11px; }
 .setup-key strong { overflow-wrap: anywhere; letter-spacing: 2px; }
+.authenticator-qr { display: flex; width: fit-content; max-width: 100%; flex-direction: column; align-items: center; gap: 9px; padding: 14px; border: 1px solid #dfe3da; border-radius: 7px; background: #fffefa; }
+.authenticator-qr img { display: block; width: 200px; height: 200px; image-rendering: pixelated; }
+.authenticator-qr span { color: var(--muted); font-size: 11px; text-align: center; }
 .backup-codes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; padding: 14px; border-radius: 7px; background: #eef3eb; }
 .backup-codes strong { grid-column: 1 / -1; margin-bottom: 4px; }
 .backup-codes code { font-size: 11px; }

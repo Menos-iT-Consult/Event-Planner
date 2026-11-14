@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import type { User } from "../App";
 import { api, formatDate, formatMoney } from "../api";
 import { CubeLoader } from "../components/CubeLoader";
+import { MobileMenuButton } from "../components/MobileMenuButton";
 import { eventProducts, getEventProduct } from "../products";
 
 interface EventItem {
@@ -37,6 +38,7 @@ export function Dashboard({ user, onLogout, eventType }: { user: User; onLogout:
   const [organizations, setOrganizations] = useState<OrganizationOption[]>([]);
   const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
@@ -130,26 +132,27 @@ export function Dashboard({ user, onLogout, eventType }: { user: User; onLogout:
 
   return (
     <main className="app-shell">
-      <aside className="sidebar">
-        <Link className="brand" to="/dashboard"><span className="brand-mark">e</span> eventflow</Link>
+      <aside className={`sidebar${mobileMenuOpen ? " mobile-open" : ""}`} id="workspace-navigation">
+        <Link className="brand" to="/dashboard" onClick={() => setMobileMenuOpen(false)}><span className="brand-mark">e</span> eventflow</Link>
+        <MobileMenuButton open={mobileMenuOpen} onClick={() => setMobileMenuOpen((open) => !open)} controls="workspace-navigation" />
         <div className="side-label">PRODUCTS</div>
-        <Link className={`side-link ${!product ? "active" : ""}`} to="/dashboard"><span>00</span> Product home</Link>
-        {eventProducts.map((item, index) => <Link className={`side-link ${product?.type === item.type ? "active" : ""}`} key={item.type} to={item.path}><span>{String(index + 1).padStart(2, "0")}</span>{item.name}</Link>)}
-        <Link className="side-link" to="/organizations"><span>OR</span> Organizations</Link>
-        {user.role === "ADMIN" && <Link className="side-link" to="/admin"><span>AD</span> Central admin</Link>}
+        <Link className={`side-link ${!product ? "active" : ""}`} to="/dashboard" onClick={() => setMobileMenuOpen(false)}><span>00</span> Product home</Link>
+        {eventProducts.map((item, index) => <Link className={`side-link ${product?.type === item.type ? "active" : ""}`} key={item.type} to={item.path} onClick={() => setMobileMenuOpen(false)}><span>{String(index + 1).padStart(2, "0")}</span>{item.name}</Link>)}
+        <Link className="side-link" to="/organizations" onClick={() => setMobileMenuOpen(false)}><span>OR</span> Organizations</Link>
+        {user.role === "ADMIN" && <Link className="side-link" to="/admin" onClick={() => setMobileMenuOpen(false)}><span>AD</span> Central admin</Link>}
         {product && <>
           <div className="side-label side-spaced">YOUR {product.name.toUpperCase()}</div>
-          {productEvents.slice(0, 5).map((event) => <Link className="side-link side-event" key={event.id} to={user.role === "CHECK_IN_STAFF" ? `/scanner/${event.id}` : `/events/${event.id}`}><span className={`event-dot ${event.type.toLowerCase()}`} />{event.title}</Link>)}
-          <button className="side-add" onClick={() => setShowCreate(true)} disabled={!canCreateEvent}>Create {product.eventName}</button>
+          {productEvents.slice(0, 5).map((event) => <Link className="side-link side-event" key={event.id} to={user.role === "CHECK_IN_STAFF" ? `/scanner/${event.id}` : `/events/${event.id}`} onClick={() => setMobileMenuOpen(false)}><span className={`event-dot ${event.type.toLowerCase()}`} />{event.title}</Link>)}
+          <button className="side-add" onClick={() => { setMobileMenuOpen(false); setShowCreate(true); }} disabled={!canCreateEvent}>Create {product.eventName}</button>
         </>}
         <div className="sidebar-bottom">
           <div className="user-chip"><span className="avatar">{user.name.slice(0, 1).toUpperCase()}</span><span><strong>{user.name}</strong><small>{user.role.replaceAll("_", " ").toLowerCase()}</small></span></div>
-          <button className="text-button" onClick={() => void changePassword()}>Change password</button>
-          <Link className="text-button" to="/security/sessions">Manage sessions</Link>
-          <button className="text-button" onClick={() => void downloadAccountData()}>Download account data</button>
-          <button className="text-button" onClick={() => void setupTwoFactor()}>Set up two-factor</button>
-          <button className="text-button" onClick={() => void disableTwoFactor()}>Disable two-factor</button>
-          <button className="text-button" onClick={() => void logout()}>Sign out</button>
+          <button className="text-button" onClick={() => { setMobileMenuOpen(false); void changePassword(); }}>Change password</button>
+          <Link className="text-button" to="/security/sessions" onClick={() => setMobileMenuOpen(false)}>Manage sessions</Link>
+          <button className="text-button" onClick={() => { setMobileMenuOpen(false); void downloadAccountData(); }}>Download account data</button>
+          <button className="text-button" onClick={() => { setMobileMenuOpen(false); void setupTwoFactor(); }}>Set up two-factor</button>
+          <button className="text-button" onClick={() => { setMobileMenuOpen(false); void disableTwoFactor(); }}>Disable two-factor</button>
+          <button className="text-button" onClick={() => { setMobileMenuOpen(false); void logout(); }}>Sign out</button>
         </div>
       </aside>
       <section className="main-content">

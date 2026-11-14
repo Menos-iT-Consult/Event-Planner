@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
+import { MobileMenuButton } from "../components/MobileMenuButton";
 
 type OrganizationRole = "OWNER" | "ADMIN" | "EVENT_MANAGER" | "FINANCE" | "AUDITOR" | "PLATFORM_ADMIN";
 
@@ -69,6 +70,7 @@ const roleLabels: Record<Exclude<OrganizationRole, "PLATFORM_ADMIN">, string> = 
 };
 
 export function OrganizationSettings({ userRole }: { userRole: string }) {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [members, setMembers] = useState<Member[]>([]);
@@ -281,11 +283,12 @@ export function OrganizationSettings({ userRole }: { userRole: string }) {
 
   return (
     <main className="app-shell">
-      <aside className="sidebar">
-        <Link className="brand" to="/dashboard"><span className="brand-mark">e</span> eventflow</Link>
+      <aside className={`sidebar${mobileMenuOpen ? " mobile-open" : ""}`} id="workspace-navigation">
+        <Link className="brand" to="/dashboard" onClick={() => setMobileMenuOpen(false)}><span className="brand-mark">e</span> eventflow</Link>
+        <MobileMenuButton open={mobileMenuOpen} onClick={() => setMobileMenuOpen((open) => !open)} controls="workspace-navigation" />
         <div className="side-label">ACCOUNT</div>
-        <Link className="side-link" to="/dashboard"><span>←</span> Product home</Link>
-        {userRole === "ADMIN" && <Link className="side-link" to="/admin"><span>AD</span> Central admin</Link>}
+        <Link className="side-link" to="/dashboard" onClick={() => setMobileMenuOpen(false)}><span>←</span> Product home</Link>
+        {userRole === "ADMIN" && <Link className="side-link" to="/admin" onClick={() => setMobileMenuOpen(false)}><span>AD</span> Central admin</Link>}
       </aside>
       <section className="main-content">
         <header className="topbar"><span className="breadcrumb">EventFlow <span>/</span> Organizations</span></header>

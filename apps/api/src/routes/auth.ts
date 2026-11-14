@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { rateLimit } from "express-rate-limit";
 import bcrypt from "bcryptjs";
+import QRCode from "qrcode";
 import { z } from "zod";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { createOpaqueToken, hashOpaqueToken } from "../lib/tokens.js";
@@ -548,8 +549,30 @@ authRouter.post(
       response.status(409).json({ error: "Two-factor authentication is already enabled" });
       return;
     }
+    const account = await prisma.user.findUnique({
+      where: { id: authUser.id },
+      select: { email: true },
+    });
+    if (!account) {
+      response.status(401).json({ error: "Account is no longer available" });
+      return;
+    }
     const secret = createBase32Secret();
     const backupCodes = Array.from({ length: 10 }, () => randomBytes(5).toString("hex").slice(0, 10).toUpperCase());
+    const issuer = "EventFlow";
+    const label = encodeURIComponent(`${issuer}:${account.email}`);
+    const authenticatorUri = `otpauth://totp/${label}?${new URLSearchParams({
+      secret,
+      issuer,
+      algorithm: "SHA1",
+      digits: "6",
+      period: "30",
+    })}`;
+    const qrCodeDataUrl = await QRCode.toDataURL(authenticatorUri, {
+      errorCorrectionLevel: "M",
+      margin: 2,
+      width: 240,
+    });
     await prisma.twoFactorCredential.upsert({
       where: { userId: authUser.id },
       create: {
@@ -564,7 +587,7 @@ authRouter.post(
         backupCodes: backupCodes.map(hashOpaqueToken),
       },
     });
-    response.json({ secret, backupCodes });
+    response.json({ secret, backupCodes, qrCodeDataUrl });
   }),
 );
 

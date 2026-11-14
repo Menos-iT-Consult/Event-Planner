@@ -177,7 +177,7 @@ webhooksRouter.post(
       const fulfilled = await prisma.$transaction(async (transaction) => {
         const updated = await transaction.votePurchase.updateMany({
           where: { id: votePurchase.id, status: OrderStatus.PENDING },
-          data: { status: OrderStatus.PAID },
+          data: { status: OrderStatus.PAID, paidAt: new Date() },
         });
         if (updated.count !== 1) return false;
         await transaction.candidate.update({
@@ -283,7 +283,7 @@ webhooksRouter.post(
       const fulfilled = await prisma.$transaction(async (transaction) => {
         const updated = await transaction.ticketOrder.updateMany({
           where: { id: order.id, status: OrderStatus.PENDING },
-          data: { status: OrderStatus.PAID },
+          data: { status: OrderStatus.PAID, paidAt: new Date() },
         });
         if (updated.count !== 1) {
           return false;

@@ -58,6 +58,7 @@ export function ForgotPassword() {
 
 export function ResetPassword() {
   const [params] = useSearchParams();
+  const isInvitation = params.get("invite") === "1";
   const [token, setToken] = useState(params.get("token") ?? "");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -75,11 +76,11 @@ export function ResetPassword() {
     }
     setBusy(true);
     try {
-      await api("/api/auth/reset-password", {
+      await api(isInvitation ? "/api/auth/accept-admin-invite" : "/api/auth/reset-password", {
         method: "POST",
         body: JSON.stringify({ token, password, confirmPassword }),
       });
-      setMessage("Your password has been reset.");
+      setMessage(isInvitation ? "Your invitation is accepted. You can now sign in." : "Your password has been reset.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not reset password");
     } finally {
@@ -88,8 +89,8 @@ export function ResetPassword() {
   }
 
   return (
-    <AccountLayout eyebrow="RESET PASSWORD" title="Create a new password">
-      <p className="muted account-intro">Use the recovery token from your email, or open this page with a valid recovery link.</p>
+    <AccountLayout eyebrow={isInvitation ? "EVENTFLOW INVITATION" : "RESET PASSWORD"} title={isInvitation ? "Set your account password" : "Create a new password"}>
+      <p className="muted account-intro">{isInvitation ? "Choose a password to accept your EventFlow invitation." : "Use the recovery token from your email, or open this page with a valid recovery link."}</p>
       <form className="stack-form" onSubmit={submit}>
         <label>Recovery token<input required minLength={32} value={token} onChange={(event) => setToken(event.target.value)} /></label>
         <label>New password<PasswordInput minLength={8} required autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>

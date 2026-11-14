@@ -104,11 +104,16 @@ export const requireAuth = asyncGuard(async (
     select: {
       id: true,
       role: true,
+      disabledAt: true,
       twoFactor: { select: { enabled: true } },
     },
   });
   if (!user) {
     response.status(401).json({ error: "Account is no longer available" });
+    return;
+  }
+  if (user.disabledAt) {
+    response.status(403).json({ error: "This account is disabled. Contact platform support." });
     return;
   }
   if (!session.lastUsedAt || now.getTime() - session.lastUsedAt.getTime() >= 5 * 60 * 1000) {

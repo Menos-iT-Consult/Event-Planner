@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { rateLimit } from "express-rate-limit";
 import bcrypt from "bcryptjs";
+import { PasswordResetPurpose } from "@prisma/client";
 import QRCode from "qrcode";
 import { z } from "zod";
 import { createHash, createHmac, randomBytes } from "node:crypto";
@@ -208,15 +209,19 @@ authRouter.get(
 
     const existingIdentity = await prisma.externalIdentity.findUnique({
       where: { issuer_subject: { issuer: claims.iss!, subject: claims.sub! } },
-      include: { user: { select: { id: true, name: true, email: true, role: true } } },
+      include: { user: { select: { id: true, name: true, email: true, role: true, disabledAt: true } } },
     });
     let user = existingIdentity?.user;
+    if (user?.disabledAt) {
+      response.redirect(302, `${loginUrl.toString()}?error=sso_account_unavailable`);
+      return;
+    }
     if (!user) {
       const emailAccount = await prisma.user.findUnique({
         where: { email },
-        select: { id: true, name: true, email: true, role: true, emailVerifiedAt: true },
+        select: { id: true, name: true, email: true, role: true, emailVerifiedAt: true, disabledAt: true },
       });
-      if (!emailAccount) {
+      if (!emailAccount || emailAccount.disabledAt) {
         response.redirect(302, `${loginUrl.toString()}?error=sso_account_unavailable`);
         return;
       }
@@ -417,6 +422,19 @@ authRouter.post(
         },
       });
       response.status(401).json({ error: "Email or password is incorrect" });
+      return;
+    }
+    if (user.disabledAt) {
+      await prisma.loginAttempt.create({
+        data: {
+          email: credentials.email,
+          userId: user.id,
+          success: false,
+          userAgent: request.get("user-agent")?.slice(0, 1000),
+          reason: "ACCOUNT_DISABLED",
+        },
+      });
+      response.status(403).json({ error: "This account is disabled. Contact platform support." });
       return;
     }
     const twoFactor = await prisma.twoFactorCredential.findUnique({ where: { userId: user.id } });
@@ -666,6 +684,7 @@ authRouter.post(
     const record = await prisma.passwordResetToken.findFirst({
       where: {
         tokenHash: hashOpaqueToken(input.token),
+        purpose: PasswordResetPurpose.PASSWORD_RESET,
         usedAt: null,
         expiresAt: { gt: new Date() },
       },
@@ -687,6 +706,66 @@ authRouter.post(
       }),
     ]);
     response.json({ reset: true });
+  }),
+);
+
+authRouter.post(
+  "/accept-admin-invite",
+  asyncHandler(async (request, response) => {
+    const input = z.object({
+      token: z.string().min(32).max(200),
+      password: z.string().min(8).max(200),
+      confirmPassword: z.string().min(8).max(200),
+    }).refine((value) => value.password === value.confirmPassword, {
+      message: "Passwords do not match",
+      path: ["confirmPassword"],
+    }).parse(request.body);
+    const record = await prisma.passwordResetToken.findFirst({
+      where: {
+        tokenHash: hashOpaqueToken(input.token),
+        purpose: "ADMIN_INVITE",
+        usedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      select: { id: true, userId: true },
+    });
+    if (!record) {
+      response.status(400).json({ error: "Invitation link is invalid or expired" });
+      return;
+    }
+    const accepted = await prisma.$transaction(async (transaction) => {
+      const accepted = await transaction.passwordResetToken.updateMany({
+        where: {
+          id: record.id,
+          purpose: "ADMIN_INVITE",
+          usedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        data: { usedAt: new Date() },
+      });
+      if (accepted.count !== 1) return false;
+      await transaction.user.update({
+        where: { id: record.userId },
+        data: {
+          passwordHash: await bcrypt.hash(input.password, 12),
+          emailVerifiedAt: new Date(),
+        },
+      });
+      await transaction.auditLog.create({
+        data: {
+          actorId: record.userId,
+          action: "ACCEPT_PLATFORM_INVITATION",
+          entityType: "user",
+          entityId: record.userId,
+        },
+      });
+      return true;
+    });
+    if (!accepted) {
+      response.status(400).json({ error: "Invitation link is invalid or expired" });
+      return;
+    }
+    response.json({ accepted: true });
   }),
 );
 

@@ -18,7 +18,7 @@ EventFlow is a multi-event planning and ticketing platform built with React, Typ
 
 2. Copy `.env.example` to `.env` and set `DATABASE_URL`, a random `JWT_SECRET` of at least 32 characters, and an administrator email/password. Configure the provider credentials you intend to use. Do not commit `.env`.
 
-3. Generate the Prisma client, create the database tables, seed the initial rate settings and administrator, and start both apps:
+3. Generate the Prisma client, create the database tables, seed the administrator, and start both apps:
 
    ```powershell
    npm run db:generate
@@ -29,6 +29,7 @@ EventFlow is a multi-event planning and ticketing platform built with React, Typ
    ```
 
    The web app runs at `http://localhost:5173`; the API health check is at `http://localhost:4000/health`.
+   After signing in as the platform administrator and completing MFA enrollment, configure the three event-type daily rates under **Billing & pricing** before creating events.
 
 4. Configure the Paystack webhook URL as `{API_ORIGIN}/api/webhooks/paystack` and the Moolre callback URL as `{API_ORIGIN}/api/webhooks/moolre`. In local development, expose the API with a trusted HTTPS tunnel before configuring webhooks. The browser checkout callback is configured with `PAYSTACK_CALLBACK_URL`.
 
@@ -37,7 +38,7 @@ The web app uses Vite's `/api` proxy in local development. When hosting the web 
 ## Integrations
 
 - **Wedding planning:** Wedding workspaces include milestone checklists, multi-day schedules, household guest lists with bulk SMS invitations, seating plans, budget/vendor payment tracking, a configurable public wedding website, and a quantity-aware gift registry. RSVP deadlines and public schedule, story, travel, dress-code, and registry visibility are configurable per wedding. The wedding planning migration must be applied before deploying these workflows.
-- **Pricing:** Seeded platform settings are editable by administrators. Event prices use decimal currency values and count inclusive calendar dates; same-day events count as one day. Rates are copied to each event at creation.
+- **Pricing:** Administrators configure daily event rates in Central Admin under **Billing & pricing**. For a new installation, set all three event-type rates there before creating events. Event prices use decimal currency values and count inclusive calendar dates; same-day events count as one day. Rates are copied to each event at creation.
 - **Cloudflare R2:** Objects are private. The API issues short-lived signed upload/read URLs. Configure the bucket CORS policy to allow the web origin for `PUT` uploads and expose the required content-type header. Images are limited to JPEG, PNG, and WebP, up to 5 MB.
 - **mNotify:** SMS credentials are server-side only. Each message attempt is logged as queued, sent, or failed; bearer tokens in private RSVP/pass URLs are redacted from persisted message text. A successful provider response means accepted by mNotify, not confirmed handset delivery.
 - **Paystack:** Ticket inventory is reserved during checkout and released if payment initialization fails or the 15-minute reservation expires. A verified late charge is refunded. Only verified `charge.success` webhooks fulfill ticket orders, apply paid votes, or activate subscription invoices; processing is idempotent and checks amount and currency.
@@ -83,9 +84,6 @@ WEB_ORIGIN=https://your-production-domain.example
 API_ORIGIN=https://your-production-domain.example
 ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=<strong-password-at-least-8-characters>
-WEDDING_DAILY_RATE=100
-VOTING_DAILY_RATE=150
-GENERAL_DAILY_RATE=125
 ```
 
 `WEB_ORIGIN` must exactly match the browser origin sent by the web service, including `https://` and without a trailing slash. If a custom domain is used, configure it in both `WEB_ORIGIN` and `API_ORIGIN`.
@@ -97,7 +95,7 @@ $env:DATABASE_URL='postgresql://...'
 npm run db:deploy
 ```
 
-Run `npm run db:seed` separately only when you intentionally need to initialize seed data.
+Run `npm run db:seed` separately only when you intentionally need to initialize the administrator account. Event daily rates are configured in Central Admin, not through environment variables.
 
 Verify the API with `https://your-production-domain.example/health`. It should report `"database":"ok"`.
 

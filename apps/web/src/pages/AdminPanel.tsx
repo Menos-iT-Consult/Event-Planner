@@ -100,6 +100,7 @@ const settingNames: Record<string, string> = {
   VOTING_DAILY_RATE: "Voting & contests",
   GENERAL_DAILY_RATE: "General events",
 };
+const dailyRateKeys = ["WEDDING_DAILY_RATE", "VOTING_DAILY_RATE", "GENERAL_DAILY_RATE"] as const;
 
 function formatCountDelta(current: number, previous: number) {
   const delta = current - previous;
@@ -202,7 +203,10 @@ export function AdminPanel({ user: adminUser }: { user: User }) {
           api<PlatformOverview>(`/api/admin/overview?days=${rangeDays}`),
         ]);
         setSettings(settingsResult.settings);
-        setRates(Object.fromEntries(settingsResult.settings.map((setting) => [setting.key, String(setting.value)])));
+        setRates(Object.fromEntries(dailyRateKeys.map((key) => [
+          key,
+          String(settingsResult.settings.find((setting) => setting.key === key)?.value ?? ""),
+        ])));
         setSubscriptionPlans(plansResult.plans);
         setOverview(current);
       } else if (targetSection === "operations") {
@@ -246,10 +250,10 @@ export function AdminPanel({ user: adminUser }: { user: User }) {
   async function saveRates(event: FormEvent) {
     event.preventDefault(); setMessage(""); setError("");
     try {
-      for (const setting of settings) {
-        await api(`/api/admin/settings/${setting.key}`, {
+      for (const key of dailyRateKeys) {
+        await api(`/api/admin/settings/${key}`, {
           method: "PUT",
-          body: JSON.stringify({ value: Number(rates[setting.key]), description: setting.description }),
+          body: JSON.stringify({ value: Number(rates[key]), description: `Daily rate for ${settingNames[key].toLowerCase()}` }),
         });
       }
       await loadAdmin("billing");
@@ -518,7 +522,10 @@ export function AdminPanel({ user: adminUser }: { user: User }) {
           </section>
         </div>}
         {section === "billing" && <div className="admin-section-grid">
-          <form className="content-card stack-form" onSubmit={saveRates}><div className="eyebrow">PRICING CONTROLS</div><h2>Daily event pricing</h2><p className="muted small-copy">Rates are applied per event day when an event is created.</p>{settings.map((setting) => <label key={setting.key}>{settingNames[setting.key] ?? setting.key}<input type="number" min="0" max="1000000000" step="0.01" required value={rates[setting.key] ?? ""} onChange={(event) => setRates({ ...rates, [setting.key]: event.target.value })} /><small className="muted">Current rate: {formatMoney(setting.value)}</small></label>)}<button className="button button-dark">Save daily rates</button></form>
+          <form className="content-card stack-form" onSubmit={saveRates}><div className="eyebrow">PRICING CONTROLS</div><h2>Daily event pricing</h2><p className="muted small-copy">Rates are applied per event day when an event is created. Configure all three rates before creating events.</p>{dailyRateKeys.map((key) => {
+            const setting = settings.find((item) => item.key === key);
+            return <label key={key}>{settingNames[key]}<input type="number" min="0" max="1000000000" step="0.01" required value={rates[key] ?? ""} onChange={(event) => setRates({ ...rates, [key]: event.target.value })} /><small className="muted">{setting ? `Current rate: ${formatMoney(setting.value)}` : "Not configured yet"}</small></label>;
+          })}<button className="button button-dark">Save daily rates</button></form>
           <form className="content-card stack-form" onSubmit={(event) => void saveSubscriptionPlan(event)}>
             <div className="eyebrow">SUBSCRIPTION PRICING</div><h2>Organization plans</h2>
             <label>Edit plan<select value={editingPlanId} onChange={(event) => selectPlan(event.target.value)}><option value="">Create a new plan</option>{subscriptionPlans.map((plan) => <option key={plan.id} value={plan.id}>{plan.name}{plan.active ? "" : " (inactive)"}</option>)}</select></label>

@@ -19,9 +19,6 @@ const envSchema = z.object({
   COOKIE_SECURE: z.enum(["true", "false"]).transform((value) => value === "true").default("false"),
   ADMIN_EMAIL: z.string().email().optional(),
   ADMIN_PASSWORD: z.string().min(8).optional(),
-  WEDDING_DAILY_RATE: z.coerce.number().nonnegative().max(9_999_999_999.99).refine(hasTwoDecimalPlaces).default(100),
-  VOTING_DAILY_RATE: z.coerce.number().nonnegative().max(9_999_999_999.99).refine(hasTwoDecimalPlaces).default(150),
-  GENERAL_DAILY_RATE: z.coerce.number().nonnegative().max(9_999_999_999.99).refine(hasTwoDecimalPlaces).default(125),
   R2_ACCOUNT_ID: z.string().optional(),
   R2_ACCESS_KEY_ID: z.string().optional(),
   R2_SECRET_ACCESS_KEY: z.string().optional(),
@@ -56,10 +53,6 @@ const envSchema = z.object({
   SMTP_PASS: z.string().optional(),
   EMAIL_FROM: z.string().trim().min(1).optional(),
 });
-
-function hasTwoDecimalPlaces(value: number): boolean {
-  return Math.abs(value * 100 - Math.round(value * 100)) < 1e-7;
-}
 
 export const config = envSchema.parse(process.env);
 if (config.NODE_ENV === "production" && !config.COOKIE_SECURE) {

@@ -2,15 +2,22 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "services": {
     "api": {
-      "root": "apps/api",
+      "root": ".",
       "framework": "express",
-      "entrypoint": "src/app.ts",
-      "buildCommand": "npm run build"
+      "entrypoint": "apps/api/src/app.ts",
+      "installCommand": "npm install --workspace @eventflow/api --include-workspace-root --include=dev",
+      "buildCommand": "npm run build --workspace @eventflow/api"
     },
     "web": {
       "root": "apps/web",
       "framework": "vite",
-      "buildCommand": "npm run build"
+      "buildCommand": "npm run build",
+      "rewrites": [
+        {
+          "source": "/(.*)",
+          "destination": "/index.html"
+        }
+      ]
     }
   },
   "rewrites": [
@@ -35,8 +42,7 @@
     {
       "source": "/(.*)",
       "destination": {
-        "service": "web",
-        "path": "/"
+        "service": "web"
       }
     }
   ]

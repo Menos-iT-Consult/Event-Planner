@@ -89,13 +89,14 @@ GENERAL_DAILY_RATE=125
 
 `WEB_ORIGIN` must exactly match the browser origin sent by the web service, including `https://` and without a trailing slash. If a custom domain is used, configure it in both `WEB_ORIGIN` and `API_ORIGIN`.
 
-After setting the environment variables, redeploy and apply the migration from a trusted local or CI shell:
+Production Vercel API builds apply committed Prisma migrations with `npm run db:deploy` before compiling; preview builds skip production migrations. For deployments outside Vercel, apply migrations from a trusted environment:
 
 ```powershell
 $env:DATABASE_URL='postgresql://...'
 npm run db:deploy
-npm run db:seed
 ```
+
+Run `npm run db:seed` separately only when you intentionally need to initialize seed data.
 
 Verify the API with `https://your-production-domain.example/health`. It should report `"database":"ok"`.
 

@@ -1,9 +1,63 @@
-CREATE TYPE "BillingProvider" AS ENUM ('PAYSTACK', 'MOOLRE');
-CREATE TYPE "SubscriptionInvoiceStatus" AS ENUM ('PENDING', 'PAID', 'FAILED', 'EXPIRED');
+BEGIN;
 
-ALTER TABLE "SubscriptionPlan"
-  ADD COLUMN "maxEvents" INTEGER,
-  ADD COLUMN "maxMembers" INTEGER;
+DO $$ BEGIN
+  CREATE TYPE "SubscriptionStatus" AS ENUM ('ACTIVE', 'TRIALING', 'PAST_DUE', 'CANCELLED', 'EXPIRED');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE "BillingProvider" AS ENUM ('PAYSTACK', 'MOOLRE');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE "SubscriptionInvoiceStatus" AS ENUM ('PENDING', 'PAID', 'FAILED', 'EXPIRED');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+CREATE TABLE "SubscriptionPlan" (
+  "id" TEXT NOT NULL,
+  "name" TEXT NOT NULL,
+  "description" TEXT,
+  "price" DECIMAL(12,2) NOT NULL,
+  "currency" TEXT NOT NULL DEFAULT 'GHS',
+  "interval" TEXT NOT NULL DEFAULT 'MONTHLY',
+  "features" JSONB,
+  "active" BOOLEAN NOT NULL DEFAULT true,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP(3) NOT NULL,
+  CONSTRAINT "SubscriptionPlan_pkey" PRIMARY KEY ("id")
+);
+CREATE UNIQUE INDEX "SubscriptionPlan_name_key" ON "SubscriptionPlan"("name");
+
+CREATE TABLE "OrganizerSubscription" (
+  "id" TEXT NOT NULL,
+  "organizationId" TEXT,
+  "userId" TEXT,
+  "planId" TEXT NOT NULL,
+  "status" "SubscriptionStatus" NOT NULL DEFAULT 'ACTIVE',
+  "providerRef" TEXT,
+  "currentPeriodStart" TIMESTAMP(3) NOT NULL,
+  "currentPeriodEnd" TIMESTAMP(3) NOT NULL,
+  "cancelledAt" TIMESTAMP(3),
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP(3) NOT NULL,
+  CONSTRAINT "OrganizerSubscription_pkey" PRIMARY KEY ("id"),
+  CONSTRAINT "OrganizerSubscription_organizationId_fkey"
+    FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "OrganizerSubscription_userId_fkey"
+    FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "OrganizerSubscription_planId_fkey"
+    FOREIGN KEY ("planId") REFERENCES "SubscriptionPlan"("id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
+CREATE UNIQUE INDEX "OrganizerSubscription_providerRef_key" ON "OrganizerSubscription"("providerRef");
+CREATE INDEX "OrganizerSubscription_organizationId_status_idx"
+  ON "OrganizerSubscription"("organizationId", "status");
+CREATE INDEX "OrganizerSubscription_userId_status_idx"
+  ON "OrganizerSubscription"("userId", "status");
 
 CREATE TABLE "ExternalIdentity" (
   "id" TEXT NOT NULL,
@@ -56,3 +110,5 @@ CREATE TABLE "SubscriptionInvoice" (
 CREATE UNIQUE INDEX "SubscriptionInvoice_reference_key" ON "SubscriptionInvoice"("reference");
 CREATE INDEX "SubscriptionInvoice_organizationId_status_createdAt_idx"
   ON "SubscriptionInvoice"("organizationId", "status", "createdAt");
+
+COMMIT;

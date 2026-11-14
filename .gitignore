@@ -8,3 +8,5 @@ apps/api/prisma/dev.db
 *.log
 .DS_Store
 
+.vercel
+.env*

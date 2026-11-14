@@ -6,7 +6,7 @@
       "framework": "express",
       "entrypoint": "apps/api/src/app.ts",
       "installCommand": "npm install --workspace @eventflow/api --include-workspace-root --include=dev",
-      "buildCommand": "npm run build --workspace @eventflow/api"
+      "buildCommand": "if [ \"$VERCEL_ENV\" = \"production\" ]; then npm run db:deploy && npm run build --workspace @eventflow/api; else npm run build --workspace @eventflow/api; fi"
     },
     "web": {
       "root": "apps/web",

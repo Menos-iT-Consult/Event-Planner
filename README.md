@@ -30,16 +30,20 @@ EventFlow is a multi-event planning and ticketing platform built with React, Typ
 
    The web app runs at `http://localhost:5173`; the API health check is at `http://localhost:4000/health`.
 
-4. Configure the Paystack webhook URL as `{API_ORIGIN}/api/webhooks/paystack`. In local development, expose the API with a trusted HTTPS tunnel before configuring webhooks. The browser checkout callback is configured with `PAYSTACK_CALLBACK_URL`.
+4. Configure the Paystack webhook URL as `{API_ORIGIN}/api/webhooks/paystack` and the Moolre callback URL as `{API_ORIGIN}/api/webhooks/moolre`. In local development, expose the API with a trusted HTTPS tunnel before configuring webhooks. The browser checkout callback is configured with `PAYSTACK_CALLBACK_URL`.
 
 The web app uses Vite's `/api` proxy in local development. When hosting the web app separately from the API, set `VITE_API_URL` at build time to the API origin and set `WEB_ORIGIN` to the exact browser origin.
 
 ## Integrations
 
+- **Wedding planning:** Wedding workspaces include milestone checklists, multi-day schedules, household guest lists with bulk SMS invitations, seating plans, budget/vendor payment tracking, a configurable public wedding website, and a quantity-aware gift registry. RSVP deadlines and public schedule, story, travel, dress-code, and registry visibility are configurable per wedding. The wedding planning migration must be applied before deploying these workflows.
 - **Pricing:** Seeded platform settings are editable by administrators. Event prices use decimal currency values and count inclusive calendar dates; same-day events count as one day. Rates are copied to each event at creation.
 - **Cloudflare R2:** Objects are private. The API issues short-lived signed upload/read URLs. Configure the bucket CORS policy to allow the web origin for `PUT` uploads and expose the required content-type header. Images are limited to JPEG, PNG, and WebP, up to 5 MB.
 - **mNotify:** SMS credentials are server-side only. Each message attempt is logged as queued, sent, or failed; bearer tokens in private RSVP/pass URLs are redacted from persisted message text. A successful provider response means accepted by mNotify, not confirmed handset delivery.
-- **Paystack:** Ticket inventory is reserved during checkout and released if payment initialization fails or the 15-minute reservation expires. A verified late charge is refunded. Only verified `charge.success` webhooks fulfill ticket orders or apply paid votes; processing is idempotent and checks amount and currency.
+- **Paystack:** Ticket inventory is reserved during checkout and released if payment initialization fails or the 15-minute reservation expires. A verified late charge is refunded. Only verified `charge.success` webhooks fulfill ticket orders, apply paid votes, or activate subscription invoices; processing is idempotent and checks amount and currency.
+- **Moolre:** Configure the API user, public key, receiving account number, billing email, and a callback secret of at least 32 characters. The callback validates the shared secret, invoice reference, receiving account, amount, currency, and success state before activating an organization subscription.
+- **OIDC:** Configure the issuer URL, client ID, and client secret. Register `{API_ORIGIN}/api/auth/oidc/callback` as the provider's redirect URI. Sign-in is restricted to existing accounts with a provider-verified email; optional comma-separated email domains can restrict account linking. OIDC discovery and signing keys are fetched from the configured issuer.
+- **Organization subscriptions:** Platform administrators manage GHS monthly/yearly plans in the central admin dashboard. Owners and administrators can check out through configured Paystack or Moolre providers; finance members can view billing. Successful verified payments activate a plan and apply its optional event/member limits. Renewals are manual one-time checkouts, not automatic recurring charges.
 
 ## Useful commands
 
@@ -72,6 +76,7 @@ NODE_ENV=production
 DATABASE_URL=postgresql://...
 JWT_SECRET=<at-least-32-random-characters>
 JWT_EXPIRES_IN=8h
+MFA_ENCRYPTION_KEY=<separate-random-secret-at-least-32-characters>
 COOKIE_SECURE=true
 WEB_ORIGIN=https://your-production-domain.example
 API_ORIGIN=https://your-production-domain.example
@@ -96,7 +101,15 @@ Verify the API with `https://your-production-domain.example/health`. It should r
 
 ## Security and operations
 
-- Admins, event managers, and check-in staff use HTTP-only session cookies; event-scoped manager and scanner access is checked against current database membership.
+- Each event belongs to an organization. Organization owners, administrators, and event managers can manage its events; finance and auditor memberships do not grant event-workspace access. Event check-in staff access remains event-scoped.
+- Sign-up creates a personal organization. Owners can create additional organizations and manage registered members from the Organizations workspace; platform administrators can assign members in any organization.
+- Sessions use random opaque HTTP-only cookies whose hashes are stored in the database. Users can inspect and revoke sessions; password resets revoke every session, and password changes revoke all other sessions.
+- Platform administrators must enroll in TOTP before using platform, organization, or event APIs. TOTP secrets are encrypted at rest with `MFA_ENCRYPTION_KEY`; if omitted, the API derives the encryption key from `JWT_SECRET`. Keep the encryption key stable or existing authenticator secrets will need to be re-enrolled after key rotation. Backup codes are stored as hashes.
+- OIDC identity linking requires a verified email from the configured issuer and never creates accounts automatically. Restrict allowed domains where appropriate and protect OIDC client credentials and callback configuration.
+- Subscription activation is driven only by provider callbacks: Paystack signatures are verified against the raw body; Moolre callbacks must match the configured secret and the invoice's reference, account, amount, and currency. Configure callback URLs and secrets before enabling a provider in production.
+- Successful mutating API requests are audited using route templates, actor, request ID, and event/organization scope; request bodies and secrets are not copied into audit metadata. Organization owners, administrators, and auditors can search the latest 100 organization audit entries by action, record, or actor.
+- Account owners can download a JSON export of profile, organization/event memberships, consent, session, sign-in, and audit metadata. It excludes password hashes, bearer tokens, and MFA secrets.
+- Before deploying this schema, review the organization backfill migration on staging and run `npm run db:deploy` before switching the API to the new code. Verify event ownership and organization membership after migration. Existing JWT-only cookies are not valid database sessions, so users must sign in again after deployment.
 - Public RSVP and pass URLs contain high-entropy bearer tokens; only token hashes are persisted. Treat invitation/pass links as private.
 - Paystack webhook signatures are checked against the raw request body. Payment fulfillment is idempotent and ticket passes are generated only after payment verification.
 - Configure `COOKIE_SECURE=true` behind HTTPS in production, use strong unique secrets, restrict the R2 bucket and provider credentials, and configure database backups and monitoring.
@@ -107,6 +120,10 @@ Verify the API with `https://your-production-domain.example/health`. It should r
 - Scheduled SMS is sent once at its scheduled time. Partial or interrupted delivery is reported for operator review and is not automatically retried, to avoid duplicate texts. SMS readiness checks verify configuration, not end-to-end provider delivery.
 - Privacy deletion requests remain pending for an administrator to verify identity, review legal retention obligations, fulfill the request, and then mark it complete. The request queue does not automatically delete account or event data.
 - Use your PostgreSQL provider's automated backups or point-in-time recovery. Keep backups encrypted and access-restricted, define a recovery-point objective, and periodically restore a backup into an isolated database before applying production migrations. Verify the app against the restored database before treating the restore as successful.
+- The application does not configure database backups, disaster-recovery targets, or alert delivery for you. Set and test those with your database/monitoring providers; record service-level objectives, recovery-point/recovery-time targets, on-call ownership, and an incident-response contact before production use.
+- Generic OIDC sign-in is available for existing, email-verified accounts. SAML SSO and SCIM provisioning are not implemented.
+- QR check-in requires a live API connection so each pass can be validated and atomically marked used. The scanner deliberately does not admit an unverified pass offline; an offline mode requires signed offline credentials and duplicate-reconciliation controls across scanners.
+- Organization event and member limits are checked when creating events or adding members under an active plan. These checks do not retroactively remove existing data when a plan expires or changes. Subscription renewal is manual; recurring billing, prorations, and payment-provider dispute automation are not implemented. Event-level refund and operational actions do not yet have configurable multi-person approval workflows.
 - Run `npm run test:e2e` for the browser smoke tests; these mock the authentication and password-recovery API responses and do not replace database-backed integration or payment-provider tests.
 
 ## Workspace layout

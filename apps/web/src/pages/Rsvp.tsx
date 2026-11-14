@@ -9,6 +9,7 @@ interface Invitation {
   plusOnesAllowed: number;
   status: string;
   dietary?: string | null;
+  rsvpDeadline?: string | null;
   event: { title: string; startDate: string; endDate: string; location: string };
 }
 
@@ -48,8 +49,8 @@ export function Rsvp() {
   }
 
   return <main className="rsvp-shell"><nav className="public-nav"><Link className="brand" to="/"><span className="brand-mark">e</span> eventflow</Link><span className="public-event-label">A PERSONAL INVITATION</span></nav>
-    {!invitation ? <div className="rsvp-card"><div className="eyebrow">YOU’RE INVITED</div>{error ? <><h1>We couldn’t find this invitation.</h1><p className="muted">{error}</p></> : <CubeLoader label="Invite" />}</div> :
-      <div className="rsvp-card"><div className="rsvp-flower">01</div><div className="eyebrow">A LITTLE NOTE FOR YOU</div><h1>You’re invited, {invitation.name}.</h1><h2>{invitation.event.title}</h2><p>{formatDate(invitation.event.startDate)}{invitation.event.startDate !== invitation.event.endDate ? ` — ${formatDate(invitation.event.endDate)}` : ""}<br />{invitation.event.location}</p>
+    {!invitation ? <div className="rsvp-card"><div className="eyebrow">YOU’RE INVITED</div>{error ? <><h1>{/closed|deadline/i.test(error) ? "Online RSVP is closed." : "We couldn’t find this invitation."}</h1><p className="muted">{error}</p></> : <CubeLoader label="Invite" />}</div> :
+      <div className="rsvp-card"><div className="rsvp-flower">01</div><div className="eyebrow">A LITTLE NOTE FOR YOU</div><h1>You’re invited, {invitation.name}.</h1><h2>{invitation.event.title}</h2><p>{formatDate(invitation.event.startDate)}{invitation.event.startDate !== invitation.event.endDate ? ` — ${formatDate(invitation.event.endDate)}` : ""}<br />{invitation.event.location}{invitation.rsvpDeadline ? <><br />Please reply by {formatDate(invitation.rsvpDeadline)}.</> : null}</p>
         {message ? <div className="rsvp-confirmation"><span>RSVP</span><h3 role="status">{message}</h3>{error && <div className="alert alert-error" role="alert">{error}</div>}{passUrl && <a className="button button-dark" href={passUrl}>Open your digital pass</a>}<small>We’ll send a confirmation by SMS.</small></div> :
           <form className="stack-form rsvp-form" onSubmit={submit}><label>Your response<select value={status} onChange={(e) => setStatus(e.target.value)}><option value="ATTENDING">Joyfully accepts</option><option value="DECLINED">Regretfully declines</option></select></label>{status === "ATTENDING" && <><label>Number of plus-ones<input type="number" min="0" max={invitation.plusOnesAllowed} value={plusOnes} onChange={(e) => setPlusOnes(Number(e.target.value))} /><small className="muted">Your invitation includes up to {invitation.plusOnesAllowed} plus-one(s).</small></label><label>Dietary needs<textarea rows={3} maxLength={500} value={dietary} onChange={(e) => setDietary(e.target.value)} placeholder="Anything we can prepare for you?" /></label></>}{error && <div className="alert alert-error" role="alert">{error}</div>}<button className="button button-dark button-wide" disabled={busy}>{busy ? <CubeLoader label="RSVP" compact /> : "Send my RSVP"}</button></form>}
       </div>}

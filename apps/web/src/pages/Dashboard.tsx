@@ -8,6 +8,7 @@ import { eventProducts, getEventProduct } from "../products";
 
 interface EventItem {
   id: string;
+  organizationId: string;
   slug: string;
   title: string;
   type: "WEDDING" | "VOTING" | "GENERAL";
@@ -19,6 +20,12 @@ interface EventItem {
   location: string;
 }
 
+interface OrganizationOption {
+  id: string;
+  name: string;
+  role: "OWNER" | "ADMIN" | "EVENT_MANAGER" | "FINANCE" | "AUDITOR" | "PLATFORM_ADMIN";
+}
+
 const eventLabels = {
   WEDDING: "Wedding",
   VOTING: "Voting & contest",
@@ -27,6 +34,8 @@ const eventLabels = {
 
 export function Dashboard({ user, onLogout, eventType }: { user: User; onLogout: () => void; eventType?: EventItem["type"] }) {
   const [events, setEvents] = useState<EventItem[]>([]);
+  const [organizations, setOrganizations] = useState<OrganizationOption[]>([]);
+  const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -34,8 +43,17 @@ export function Dashboard({ user, onLogout, eventType }: { user: User; onLogout:
 
   async function loadEvents() {
     try {
-      const result = await api<{ events: EventItem[] }>("/api/events");
-      setEvents(result.events);
+      const [eventResult, organizationResult] = await Promise.all([
+        api<{ events: EventItem[] }>("/api/events"),
+        api<{ organizations: OrganizationOption[] }>("/api/organizations"),
+      ]);
+      setEvents(eventResult.events);
+      setOrganizations(organizationResult.organizations);
+      setSelectedOrganizationId((current) =>
+        organizationResult.organizations.some((organization) => organization.id === current)
+          ? current
+          : organizationResult.organizations[0]?.id ?? "",
+      );
       setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not load events");
@@ -76,7 +94,36 @@ export function Dashboard({ user, onLogout, eventType }: { user: User; onLogout:
     navigate("/security/two-factor");
   }
 
-  const productEvents = eventType ? events.filter((event) => event.type === eventType) : [];
+  async function downloadAccountData() {
+    try {
+      const data = await api<Record<string, unknown>>("/api/auth/data-export");
+      const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "eventflow-account-data.json";
+      document.body.append(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not export account data");
+    }
+  }
+
+  const manageableOrganizations = organizations.filter((organization) =>
+    user.role === "ADMIN" || ["OWNER", "ADMIN", "EVENT_MANAGER"].includes(organization.role),
+  );
+  const selectedManageableOrganizationId = manageableOrganizations.some((organization) => organization.id === selectedOrganizationId)
+    ? selectedOrganizationId
+    : manageableOrganizations[0]?.id ?? "";
+  const canCreateEvent = user.role !== "CHECK_IN_STAFF" && manageableOrganizations.length > 0;
+  const productEvents = eventType
+    ? events.filter((event) =>
+        event.type === eventType &&
+        (!selectedOrganizationId || event.organizationId === selectedOrganizationId),
+      )
+    : [];
   const eventCount = productEvents.length;
   const upcoming = productEvents.filter((event) => new Date(event.endDate) >= new Date()).length;
   const product = eventType ? getEventProduct(eventType) : null;
@@ -88,15 +135,18 @@ export function Dashboard({ user, onLogout, eventType }: { user: User; onLogout:
         <div className="side-label">PRODUCTS</div>
         <Link className={`side-link ${!product ? "active" : ""}`} to="/dashboard"><span>00</span> Product home</Link>
         {eventProducts.map((item, index) => <Link className={`side-link ${product?.type === item.type ? "active" : ""}`} key={item.type} to={item.path}><span>{String(index + 1).padStart(2, "0")}</span>{item.name}</Link>)}
+        <Link className="side-link" to="/organizations"><span>OR</span> Organizations</Link>
         {user.role === "ADMIN" && <Link className="side-link" to="/admin"><span>AD</span> Central admin</Link>}
         {product && <>
           <div className="side-label side-spaced">YOUR {product.name.toUpperCase()}</div>
           {productEvents.slice(0, 5).map((event) => <Link className="side-link side-event" key={event.id} to={user.role === "CHECK_IN_STAFF" ? `/scanner/${event.id}` : `/events/${event.id}`}><span className={`event-dot ${event.type.toLowerCase()}`} />{event.title}</Link>)}
-          <button className="side-add" onClick={() => setShowCreate(true)} disabled={user.role === "CHECK_IN_STAFF"}>Create {product.eventName}</button>
+          <button className="side-add" onClick={() => setShowCreate(true)} disabled={!canCreateEvent}>Create {product.eventName}</button>
         </>}
         <div className="sidebar-bottom">
           <div className="user-chip"><span className="avatar">{user.name.slice(0, 1).toUpperCase()}</span><span><strong>{user.name}</strong><small>{user.role.replaceAll("_", " ").toLowerCase()}</small></span></div>
           <button className="text-button" onClick={() => void changePassword()}>Change password</button>
+          <Link className="text-button" to="/security/sessions">Manage sessions</Link>
+          <button className="text-button" onClick={() => void downloadAccountData()}>Download account data</button>
           <button className="text-button" onClick={() => void setupTwoFactor()}>Set up two-factor</button>
           <button className="text-button" onClick={() => void disableTwoFactor()}>Disable two-factor</button>
           <button className="text-button" onClick={() => void logout()}>Sign out</button>
@@ -106,9 +156,18 @@ export function Dashboard({ user, onLogout, eventType }: { user: User; onLogout:
         <header className="topbar"><span className="breadcrumb">EventFlow <span>/</span> {product?.name ?? "Product home"}</span><span className="today-label">{new Intl.DateTimeFormat(undefined, { dateStyle: "full" }).format(new Date())}</span></header>
         <div className="page-heading">
           <div><div className="eyebrow">{product ? product.name.toUpperCase() : "YOUR EVENTFLOW WORKSPACE"}</div><h1>Good morning, {user.name.split(" ")[0]}</h1><p>{product ? product.description : "Choose a dedicated workspace for the kind of event you’re planning."}</p></div>
-          <div className="heading-actions">{user.role === "ADMIN" && <Link className="button button-outline" to="/admin">Central admin</Link>}{product && user.role !== "CHECK_IN_STAFF" && <button className="button button-dark" onClick={() => setShowCreate(true)}>New {product.eventName}</button>}</div>
+          <div className="heading-actions">
+            {product && organizations.length > 1 && <label className="dashboard-organization-select">Organization
+              <select aria-label="Organization" value={selectedOrganizationId} onChange={(event) => setSelectedOrganizationId(event.target.value)}>
+                {organizations.map((organization) => <option key={organization.id} value={organization.id}>{organization.name}</option>)}
+              </select>
+            </label>}
+            {user.role === "ADMIN" && <Link className="button button-outline" to="/admin">Central admin</Link>}
+            {product && canCreateEvent && <button className="button button-dark" onClick={() => setShowCreate(true)}>New {product.eventName}</button>}
+          </div>
         </div>
         {error && <div className="alert alert-error" role="alert">{error}</div>}
+        {product && organizations.length === 0 && user.role !== "CHECK_IN_STAFF" && <div className="alert alert-error" role="alert">Create or join an organization before creating events. <Link to="/organizations">Manage organizations</Link></div>}
         {!product ? <section className="product-hub">
           <div className="section-heading"><div><div className="eyebrow">CHOOSE YOUR WORKSPACE</div><h2>Every event, its own space.</h2></div></div>
           <div className="product-hub-grid">
@@ -145,17 +204,17 @@ export function Dashboard({ user, onLogout, eventType }: { user: User; onLogout:
             ))}
           </div>
         ) : (
-          <div className="empty-panel empty-illustration"><div className="empty-flower">01</div><h3>Your next favorite memory starts here.</h3><p>Create your first {product.name.toLowerCase()} event to get started.</p>{user.role !== "CHECK_IN_STAFF" && <button className="button button-outline" onClick={() => setShowCreate(true)}>Create your first event</button>}</div>
+          <div className="empty-panel empty-illustration"><div className="empty-flower">01</div><h3>Your next favorite memory starts here.</h3><p>Create your first {product.name.toLowerCase()} event to get started.</p>{canCreateEvent && <button className="button button-outline" onClick={() => setShowCreate(true)}>Create your first event</button>}</div>
         )}
         </>}
       </section>
-      {showCreate && product && <CreateEvent eventType={product.type} onClose={() => setShowCreate(false)} onCreated={(id) => navigate(`/events/${id}`)} />}
+      {showCreate && product && <CreateEvent eventType={product.type} organizations={manageableOrganizations} initialOrganizationId={selectedManageableOrganizationId} onClose={() => setShowCreate(false)} onCreated={(id) => navigate(`/events/${id}`)} />}
     </main>
   );
 }
 
-function CreateEvent({ eventType, onClose, onCreated }: { eventType: EventItem["type"]; onClose: () => void; onCreated: (id: string) => void }) {
-  const [form, setForm] = useState({ title: "", type: eventType, startDate: "", endDate: "", location: "", description: "", voteUnitPrice: "" });
+function CreateEvent({ eventType, organizations, initialOrganizationId, onClose, onCreated }: { eventType: EventItem["type"]; organizations: OrganizationOption[]; initialOrganizationId: string; onClose: () => void; onCreated: (id: string) => void }) {
+  const [form, setForm] = useState({ title: "", type: eventType, organizationId: initialOrganizationId, startDate: "", endDate: "", location: "", description: "", voteUnitPrice: "" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -188,6 +247,7 @@ function CreateEvent({ eventType, onClose, onCreated }: { eventType: EventItem["
         <div className="eyebrow">A NEW CHAPTER</div><h2 id="create-title">Create an event</h2><p className="muted">Every great gathering begins with a few details.</p>
         <form className="stack-form" onSubmit={submit}>
           <label>Event name<input required minLength={2} maxLength={160} value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="A celebration to remember" /></label>
+          <label>Organization<select required value={form.organizationId} onChange={(event) => setForm({ ...form, organizationId: event.target.value })}>{organizations.map((organization) => <option key={organization.id} value={organization.id}>{organization.name}</option>)}</select></label>
           <div className="event-product-selected"><span className={`event-dot ${eventType.toLowerCase()}`} />{eventLabels[eventType]} workspace</div>
           {form.type === "VOTING" && <label>Paid vote price per vote (GHS) <span className="muted">optional</span><input type="number" min="0.01" step="0.01" value={form.voteUnitPrice} onChange={(event) => setForm({ ...form, voteUnitPrice: event.target.value })} placeholder="Leave blank for free votes only" /></label>}
           <div className="form-row"><label>Starts<input type="date" required value={form.startDate} onChange={(event) => setForm({ ...form, startDate: event.target.value })} /></label><label>Ends<input type="date" required min={form.startDate} value={form.endDate} onChange={(event) => setForm({ ...form, endDate: event.target.value })} /></label></div>

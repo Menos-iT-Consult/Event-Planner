@@ -7,12 +7,16 @@ import { config } from "./config.js";
 import { adminRouter } from "./routes/admin.js";
 import { authRouter } from "./routes/auth.js";
 import { eventsRouter } from "./routes/events.js";
+import { organizationsRouter } from "./routes/organizations.js";
+import { subscriptionsRouter } from "./routes/subscriptions.js";
+import { weddingRouter } from "./routes/wedding.js";
 import { publicRouter } from "./routes/public.js";
 import { webhooksRouter } from "./routes/webhooks.js";
 import { errorHandler, notFound } from "./middleware/errors.js";
 import { prisma } from "./db.js";
 import { featuresAdminRouter, featuresEventRouter, featuresPublicRouter } from "./routes/features.js";
 import { createRequestId, logEvent } from "./lib/logger.js";
+import type { AuthenticatedRequest } from "./middleware/auth.js";
 
 export const app = express();
 export default app;
@@ -33,6 +37,34 @@ app.use((request, response, next) => {
       status: response.statusCode,
       durationMs: Math.round(performance.now() - startedAt),
     });
+    if (
+      request.originalUrl.startsWith("/api/") &&
+      !["GET", "HEAD", "OPTIONS"].includes(request.method) &&
+      response.statusCode < 400
+    ) {
+      const authenticated = request as AuthenticatedRequest;
+      const eventId = response.locals.eventId as string | undefined;
+      const organizationId = response.locals.organizationId as string | undefined;
+      const entityType = eventId ? "event" : organizationId ? "organization" : "api_request";
+      const entityId = eventId ?? organizationId;
+      const action = `${request.method} ${request.baseUrl}${route ? String(route) : "unmatched"}`;
+      void prisma.auditLog.create({
+        data: {
+          actorId: authenticated.user?.id,
+          organizationId,
+          eventId,
+          action,
+          entityType,
+          entityId,
+          metadata: {
+            requestId,
+            status: response.statusCode,
+          },
+        },
+      }).catch((error: unknown) => {
+        logEvent("error", "audit.write_failed", { requestId, action, error });
+      });
+    }
   });
   next();
 });
@@ -81,7 +113,10 @@ app.use(express.json({ limit: "1mb" }));
 app.use("/api/auth", authRouter);
 app.use("/api/admin", adminRouter);
 app.use("/api/admin/features", featuresAdminRouter);
+app.use("/api/organizations", organizationsRouter);
+app.use("/api/subscriptions", subscriptionsRouter);
 app.use("/api/events", eventsRouter);
+app.use("/api/events", weddingRouter);
 app.use("/api/events", featuresEventRouter);
 app.use(
   "/api/public",

@@ -5,7 +5,7 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler } from "../lib/async-handler.js";
 import { moneySchema } from "../lib/money.js";
-import { requireAuth, requireRole, type AuthenticatedRequest } from "../middleware/auth.js";
+import { requireAdminMfa, requireAuth, requireRole, type AuthenticatedRequest } from "../middleware/auth.js";
 
 const settingSchema = z.object({
   value: moneySchema(),
@@ -19,8 +19,62 @@ const userSchema = z.object({
   role: z.enum(["ADMIN", "EVENT_MANAGER", "CHECK_IN_STAFF"]),
 });
 
+const subscriptionPlanSchema = z.object({
+  name: z.string().trim().min(2).max(100),
+  description: z.string().trim().max(500).optional(),
+  price: moneySchema(),
+  currency: z.literal("GHS").default("GHS"),
+  interval: z.enum(["MONTHLY", "YEARLY"]).default("MONTHLY"),
+  features: z.array(z.string().trim().min(1).max(100)).max(30).default([]),
+  maxEvents: z.number().int().positive().nullable().optional(),
+  maxMembers: z.number().int().positive().nullable().optional(),
+  active: z.boolean().default(true),
+});
+
 export const adminRouter = Router();
-adminRouter.use(requireAuth, requireRole(UserRole.ADMIN));
+adminRouter.use(requireAuth, requireRole(UserRole.ADMIN), requireAdminMfa);
+
+adminRouter.get("/subscription-plans", asyncHandler(async (_request, response) => {
+  const plans = await prisma.subscriptionPlan.findMany({
+    orderBy: [{ active: "desc" }, { price: "asc" }, { name: "asc" }],
+  });
+  response.json({
+    plans: plans.map((plan) => ({
+      ...plan,
+      features: Array.isArray(plan.features)
+        ? plan.features.filter((feature): feature is string => typeof feature === "string")
+        : [],
+    })),
+  });
+}));
+
+adminRouter.post("/subscription-plans", asyncHandler(async (request, response) => {
+  const input = subscriptionPlanSchema.parse(request.body);
+  const plan = await prisma.subscriptionPlan.create({
+    data: {
+      ...input,
+      price: new Prisma.Decimal(input.price),
+      features: input.features,
+    },
+  });
+  await writeAudit((request as AuthenticatedRequest).user!.id, "CREATE_SUBSCRIPTION_PLAN", "subscription_plan", plan.id);
+  response.status(201).json({ plan });
+}));
+
+adminRouter.put("/subscription-plans/:planId", asyncHandler(async (request, response) => {
+  const planId = z.string().uuid().parse(request.params.planId);
+  const input = subscriptionPlanSchema.parse(request.body);
+  const plan = await prisma.subscriptionPlan.update({
+    where: { id: planId },
+    data: {
+      ...input,
+      price: new Prisma.Decimal(input.price),
+      features: input.features,
+    },
+  });
+  await writeAudit((request as AuthenticatedRequest).user!.id, "UPDATE_SUBSCRIPTION_PLAN", "subscription_plan", plan.id);
+  response.json({ plan });
+}));
 
 async function writeAudit(
   actorId: string,
@@ -118,11 +172,21 @@ adminRouter.get("/users", asyncHandler(async (_request, response) => {
     select: {
       id: true, name: true, email: true, role: true, emailVerifiedAt: true,
       organization: { select: { id: true, name: true } },
+      organizationMemberships: {
+        take: 1,
+        orderBy: { createdAt: "asc" },
+        select: { organization: { select: { id: true, name: true } } },
+      },
       createdAt: true,
     },
     orderBy: { createdAt: "desc" },
   });
-  response.json({ users });
+  response.json({
+    users: users.map(({ organization, organizationMemberships, ...user }) => ({
+      ...user,
+      organization: organization ?? organizationMemberships[0]?.organization ?? null,
+    })),
+  });
 }));
 
 adminRouter.post("/users/:userId/reset-password", asyncHandler(async (request, response) => {
@@ -133,14 +197,20 @@ adminRouter.post("/users/:userId/reset-password", asyncHandler(async (request, r
     response.status(404).json({ error: "User account not found" });
     return;
   }
-  await prisma.user.update({
-    where: { id: target.id },
-    data: { passwordHash: await bcrypt.hash(input.password, 12) },
-  });
-  await prisma.passwordResetToken.updateMany({
-    where: { userId: target.id, usedAt: null },
-    data: { usedAt: new Date() },
-  });
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: target.id },
+      data: { passwordHash: await bcrypt.hash(input.password, 12) },
+    }),
+    prisma.passwordResetToken.updateMany({
+      where: { userId: target.id, usedAt: null },
+      data: { usedAt: new Date() },
+    }),
+    prisma.userSession.updateMany({
+      where: { userId: target.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    }),
+  ]);
   await writeAudit((request as AuthenticatedRequest).user!.id, "RESET_PASSWORD", "user", target.id, { email: target.email });
   response.json({ reset: true, email: target.email });
 }));

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import type { User } from "../App";
@@ -145,6 +145,89 @@ export function TwoFactorChallenge({ onLogin }: { onLogin: (user: User) => void 
         <button className="button button-dark" disabled={busy}>{busy ? <CubeLoader label="Verify" compact /> : "Verify and sign in"}</button>
       </form>
       <p className="login-note"><Link to="/login">Start sign in again</Link></p>
+    </AccountLayout>
+  );
+}
+
+interface SessionItem {
+  id: string;
+  device: string | null;
+  createdAt: string;
+  lastUsedAt: string | null;
+  expiresAt: string;
+  current: boolean;
+}
+
+export function SessionManagement() {
+  const navigate = useNavigate();
+  const [sessions, setSessions] = useState<SessionItem[]>([]);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  async function loadSessions() {
+    try {
+      const result = await api<{ sessions: SessionItem[] }>("/api/auth/sessions");
+      setSessions(result.sessions);
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not load active sessions");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { void loadSessions(); }, []);
+
+  async function revokeOthers() {
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const result = await api<{ revoked: number }>("/api/auth/sessions/revoke-others", { method: "POST" });
+      setMessage(`${result.revoked} other session${result.revoked === 1 ? "" : "s"} signed out.`);
+      await loadSessions();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not sign out other sessions");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function revoke(session: SessionItem) {
+    setBusy(true);
+    setError("");
+    try {
+      await api(`/api/auth/sessions/${session.id}`, { method: "DELETE" });
+      if (session.current) {
+        navigate("/login", { replace: true });
+        return;
+      }
+      setMessage("Session signed out.");
+      await loadSessions();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not sign out this session");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <AccountLayout eyebrow="ACCOUNT SECURITY" title="Active sessions">
+      <p className="muted account-intro">Review signed-in devices and revoke sessions you no longer recognize.</p>
+      {error && <div className="alert alert-error" role="alert">{error}</div>}
+      {message && <div className="alert alert-success" role="status">{message}</div>}
+      {loading ? <p className="muted">Loading sessions…</p> : sessions.length ? (
+        <div className="session-list">
+          {sessions.map((session) => <article className="session-item" key={session.id}>
+            <div><strong>{session.current ? "This device" : "Signed-in device"}</strong><small>{session.device ?? "Device details unavailable"}</small><small>Last active {session.lastUsedAt ? new Date(session.lastUsedAt).toLocaleString() : "not recorded"} · Expires {new Date(session.expiresAt).toLocaleString()}</small></div>
+            <button className="text-button" disabled={busy} onClick={() => void revoke(session)}>Sign out</button>
+          </article>)}
+          <button className="button button-outline" disabled={busy || sessions.length < 2} onClick={() => void revokeOthers()}>Sign out other sessions</button>
+        </div>
+      ) : <div className="empty-note">No active sessions are available.</div>}
+      <p className="login-note"><Link to="/dashboard">Back to workspace</Link></p>
     </AccountLayout>
   );
 }

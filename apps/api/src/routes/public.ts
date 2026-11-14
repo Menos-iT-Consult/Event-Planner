@@ -222,14 +222,35 @@ publicRouter.get(
         plusOnesAllowed: true,
         status: true,
         dietary: true,
-        event: { select: { title: true, startDate: true, endDate: true, location: true } },
+        event: {
+          select: {
+            title: true,
+            startDate: true,
+            endDate: true,
+            location: true,
+            weddingProfile: { select: { rsvpEnabled: true, rsvpDeadline: true } },
+          },
+        },
       },
     });
     if (!guest) {
       response.status(404).json({ error: "RSVP link is invalid or expired" });
       return;
     }
-    response.json({ invitation: guest });
+    if (guest.event.weddingProfile?.rsvpEnabled === false) {
+      response.status(410).json({ error: "Online RSVPs are closed for this wedding" });
+      return;
+    }
+    if (guest.event.weddingProfile?.rsvpDeadline && guest.event.weddingProfile.rsvpDeadline < new Date()) {
+      response.status(410).json({ error: "The RSVP deadline has passed" });
+      return;
+    }
+    response.json({
+      invitation: {
+        ...guest,
+        rsvpDeadline: guest.event.weddingProfile?.rsvpDeadline ?? null,
+      },
+    });
   }),
 );
 
@@ -263,12 +284,41 @@ publicRouter.get(
           select: { id: true, name: true, description: true, price: true, quantity: true, sold: true },
         },
         sessions: {
-          select: { id: true, title: true, description: true, location: true, startsAt: true, endsAt: true, speaker: true },
+          where: {
+            OR: [
+              { weddingDayId: null },
+              { weddingDay: { isPublic: true } },
+            ],
+          },
+          select: { id: true, title: true, description: true, location: true, startsAt: true, endsAt: true, speaker: true, weddingDayId: true },
           orderBy: { startsAt: "asc" },
         },
         registry: {
           where: { claimed: false },
-          select: { id: true, title: true, url: true, price: true },
+          select: { id: true, title: true, category: true, url: true, price: true, quantity: true, claimedCount: true },
+        },
+        weddingProfile: {
+          select: {
+            headline: true,
+            welcomeMessage: true,
+            story: true,
+            dressCode: true,
+            travelInfo: true,
+            faq: true,
+            showStory: true,
+            showDressCode: true,
+            showTravelInfo: true,
+            showSchedule: true,
+            showRegistry: true,
+            showRsvpDeadline: true,
+            rsvpDeadline: true,
+            rsvpEnabled: true,
+          },
+        },
+        weddingDays: {
+          where: { isPublic: true },
+          select: { id: true, name: true, date: true, location: true, sortOrder: true },
+          orderBy: [{ date: "asc" }, { sortOrder: "asc" }],
         },
       },
     });
@@ -288,6 +338,22 @@ publicRouter.get(
     response.json({
       event: {
         ...event,
+        sessions: event.type === EventType.WEDDING && event.weddingProfile?.showSchedule === false
+          ? []
+          : event.sessions,
+        registry: event.type === EventType.WEDDING && event.weddingProfile?.showRegistry === false
+          ? []
+          : event.registry,
+        weddingProfile: event.weddingProfile
+          ? {
+              ...event.weddingProfile,
+              story: event.weddingProfile.showStory ? event.weddingProfile.story : null,
+              dressCode: event.weddingProfile.showDressCode ? event.weddingProfile.dressCode : null,
+              travelInfo: event.weddingProfile.showTravelInfo ? event.weddingProfile.travelInfo : null,
+              rsvpDeadline: event.weddingProfile.showRsvpDeadline ? event.weddingProfile.rsvpDeadline : null,
+              faq: Array.isArray(event.weddingProfile.faq) ? event.weddingProfile.faq : [],
+            }
+          : null,
         categories: event.categories.map((category) => ({
           ...category,
           candidates: category.candidates.map((candidate) => ({
@@ -307,11 +373,25 @@ publicRouter.post(
     const input = z.object({
       name: z.string().trim().min(1).max(120),
     }).parse(request.body);
-    const result = await prisma.registryItem.updateMany({
-      where: { id: getRouteParam(request, "itemId"), claimed: false },
-      data: { claimed: true, claimedBy: input.name },
+    const itemId = getRouteParam(request, "itemId");
+    const result = await prisma.$transaction(async (transaction) => {
+      await transaction.$queryRaw`SELECT "id" FROM "RegistryItem" WHERE "id" = ${itemId} FOR UPDATE`;
+      const item = await transaction.registryItem.findFirst({
+        where: { id: itemId, event: { isPublished: true } },
+        select: { id: true, quantity: true, claimedCount: true },
+      });
+      if (!item || item.claimedCount >= item.quantity) return false;
+      const claimedCount = item.claimedCount + 1;
+      await transaction.registryItem.update({
+        where: { id: item.id },
+        data: { claimedCount, claimed: claimedCount >= item.quantity, claimedBy: input.name },
+      });
+      await transaction.registryGiftClaim.create({
+        data: { itemId: item.id, name: input.name },
+      });
+      return true;
     });
-    if (result.count !== 1) {
+    if (!result) {
       response.status(409).json({ error: "This gift has already been claimed" });
       return;
     }
@@ -331,10 +411,26 @@ publicRouter.post(
     const tokenHash = hashOpaqueToken(token);
     const guest = await prisma.guest.findUnique({
       where: { rsvpTokenHash: tokenHash },
-      include: { event: { select: { id: true, title: true } } },
+      include: {
+        event: {
+          select: {
+            id: true,
+            title: true,
+            weddingProfile: { select: { rsvpEnabled: true, rsvpDeadline: true } },
+          },
+        },
+      },
     });
     if (!guest) {
       response.status(404).json({ error: "RSVP link is invalid or expired" });
+      return;
+    }
+    if (guest.event.weddingProfile?.rsvpEnabled === false) {
+      response.status(409).json({ error: "Online RSVPs are closed for this wedding" });
+      return;
+    }
+    if (guest.event.weddingProfile?.rsvpDeadline && guest.event.weddingProfile.rsvpDeadline < new Date()) {
+      response.status(409).json({ error: "The RSVP deadline has passed" });
       return;
     }
     if (input.plusOnes !== undefined && input.plusOnes > guest.plusOnesAllowed) {

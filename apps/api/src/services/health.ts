@@ -10,10 +10,20 @@ function providerChecks(databaseStatus: ProviderStatus): ProviderCheck[] {
     config.R2_ACCOUNT_ID && config.R2_ACCESS_KEY_ID && config.R2_SECRET_ACCESS_KEY && config.R2_BUCKET_NAME,
   );
   const hasSmtp = Boolean(config.SMTP_HOST);
+  const hasMoolre = Boolean(
+    config.MOOLRE_API_USER &&
+    config.MOOLRE_API_PUBKEY &&
+    config.MOOLRE_ACCOUNT_NUMBER &&
+    config.MOOLRE_BILLING_EMAIL &&
+    config.MOOLRE_CALLBACK_SECRET
+  );
+  const hasOidc = Boolean(config.OIDC_ISSUER && config.OIDC_CLIENT_ID && config.OIDC_CLIENT_SECRET);
   return [
     { provider: "database", status: databaseStatus, details: "Database connectivity check" },
     { provider: "sms", status: config.MNOTIFY_API_KEY ? "ready" : "not_configured", details: "mNotify credentials configured" },
-    { provider: "payments", status: config.PAYSTACK_SECRET_KEY ? "ready" : "not_configured", details: "Paystack credentials configured" },
+    { provider: "payments", status: config.PAYSTACK_SECRET_KEY || hasMoolre ? "ready" : "not_configured", details: "At least one subscription or event payment provider is configured" },
+    { provider: "moolre", status: hasMoolre ? "ready" : "not_configured", details: "Moolre credentials and callback verification configured" },
+    { provider: "oidc", status: hasOidc ? "ready" : "not_configured", details: "OIDC issuer and client credentials configured" },
     { provider: "objectStorage", status: hasR2 ? "ready" : "not_configured", details: "Cloudflare R2 credentials configured" },
     { provider: "email", status: hasSmtp ? "ready" : "not_configured", details: "SMTP credentials configured" },
   ];

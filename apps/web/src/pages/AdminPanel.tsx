@@ -11,6 +11,19 @@ interface Setting {
   description?: string | null;
 }
 
+interface SubscriptionPlan {
+  id: string;
+  name: string;
+  description: string | null;
+  price: string | number;
+  currency: string;
+  interval: "MONTHLY" | "YEARLY";
+  features: string[];
+  maxEvents: number | null;
+  maxMembers: number | null;
+  active: boolean;
+}
+
 interface PlatformOverview {
   events:number;
   guests:number;
@@ -53,6 +66,18 @@ export function AdminPanel({ user: adminUser }: { user: User }) {
   const [section, setSection] = useState<AdminSection>("overview");
   const [loading, setLoading] = useState(true);
   const [settings, setSettings] = useState<Setting[]>([]);
+  const [subscriptionPlans, setSubscriptionPlans] = useState<SubscriptionPlan[]>([]);
+  const [editingPlanId, setEditingPlanId] = useState("");
+  const [planDraft, setPlanDraft] = useState({
+    name: "",
+    description: "",
+    price: "",
+    interval: "MONTHLY" as "MONTHLY" | "YEARLY",
+    features: "",
+    maxEvents: "",
+    maxMembers: "",
+    active: true,
+  });
   const [rates, setRates] = useState<Record<string, string>>({});
   const [user, setUser] = useState({ name: "", email: "", password: "", role: "EVENT_MANAGER" });
   const [message, setMessage] = useState("");
@@ -81,7 +106,7 @@ export function AdminPanel({ user: adminUser }: { user: User }) {
       }
     }
 
-    const [settingsResult, current, inbox, logs, orgs, refundData, jobData, health, deletionData, userData] = await Promise.all([
+    const [settingsResult, current, inbox, logs, orgs, refundData, jobData, health, deletionData, userData, plansResult] = await Promise.all([
       load("Pricing", api<{ settings: Setting[] }>("/api/admin/settings")),
       load("Overview", api<PlatformOverview>("/api/admin/overview")),
       load("Contact inbox", api<{messages:Array<{id:string;name:string;email:string;message:string;handled:boolean;createdAt:string}>}>("/api/admin/contact")),
@@ -92,6 +117,7 @@ export function AdminPanel({ user: adminUser }: { user: User }) {
       load("Provider health", api<ProviderHealth>("/api/admin/features/provider-health")),
       load("Privacy requests", api<{requests:typeof deletionRequests}>("/api/admin/features/data-deletion-requests")),
       load("User directory", api<{users:AdminUser[]}>("/api/admin/users")),
+      load("Subscription plans", api<{plans:SubscriptionPlan[]}>("/api/admin/subscription-plans")),
     ]);
 
     if (settingsResult) {
@@ -107,6 +133,7 @@ export function AdminPanel({ user: adminUser }: { user: User }) {
     if (health) setProviderHealth(health);
     if (deletionData) setDeletionRequests(deletionData.requests);
     if (userData) setUsers(userData.users);
+    if (plansResult) setSubscriptionPlans(plansResult.plans);
     if (failures.length) setError(`Some dashboard data could not be loaded. ${failures.join(" · ")}`);
     setLoading(false);
   }
@@ -124,6 +151,62 @@ export function AdminPanel({ user: adminUser }: { user: User }) {
       }
       setMessage("Daily event rates updated.");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save pricing"); }
+  }
+
+  function selectPlan(planId: string) {
+    setEditingPlanId(planId);
+    const plan = subscriptionPlans.find((item) => item.id === planId);
+    setPlanDraft(plan
+      ? {
+          name: plan.name,
+          description: plan.description ?? "",
+          price: String(plan.price),
+          interval: plan.interval,
+          features: plan.features.join(", "),
+          maxEvents: plan.maxEvents === null ? "" : String(plan.maxEvents),
+          maxMembers: plan.maxMembers === null ? "" : String(plan.maxMembers),
+          active: plan.active,
+        }
+      : {
+          name: "",
+          description: "",
+          price: "",
+          interval: "MONTHLY",
+          features: "",
+          maxEvents: "",
+          maxMembers: "",
+          active: true,
+        });
+  }
+
+  async function saveSubscriptionPlan(event: FormEvent) {
+    event.preventDefault();
+    setMessage("");
+    setError("");
+    const payload = {
+      name: planDraft.name,
+      description: planDraft.description || undefined,
+      price: Number(planDraft.price),
+      currency: "GHS",
+      interval: planDraft.interval,
+      features: planDraft.features.split(",").map((feature) => feature.trim()).filter(Boolean),
+      maxEvents: planDraft.maxEvents === "" ? null : Number(planDraft.maxEvents),
+      maxMembers: planDraft.maxMembers === "" ? null : Number(planDraft.maxMembers),
+      active: planDraft.active,
+    };
+    try {
+      const result = await api<{plan:SubscriptionPlan}>(`/api/admin/subscription-plans${editingPlanId ? `/${editingPlanId}` : ""}`, {
+        method: editingPlanId ? "PUT" : "POST",
+        body: JSON.stringify(payload),
+      });
+      setSubscriptionPlans((current) => editingPlanId
+        ? current.map((plan) => plan.id === result.plan.id ? result.plan : plan)
+        : [...current, result.plan]);
+      setEditingPlanId(result.plan.id);
+      setMessage(`Subscription plan ${editingPlanId ? "updated" : "created"}.`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not save subscription plan");
+    }
   }
 
   async function createUser(event: FormEvent) {
@@ -207,6 +290,7 @@ export function AdminPanel({ user: adminUser }: { user: User }) {
       {adminSections.map((item) => <button key={item.id} className={`side-link side-button ${section === item.id ? "active" : ""}`} onClick={() => setSection(item.id)}><span>{item.number}</span>{item.label}</button>)}
       <div className="side-label side-spaced">PRODUCTS</div>
       <Link className="side-link" to="/dashboard"><span>↗</span> Product home</Link>
+      <Link className="side-link" to="/organizations"><span>OR</span> Organizations</Link>
       <div className="sidebar-bottom">
         <div className="user-chip"><span className="avatar">{adminUser.name.slice(0, 1).toUpperCase()}</span><span><strong>{adminUser.name}</strong><small>Platform admin</small></span></div>
         <Link className="text-button" to="/dashboard">Return to workspace</Link>
@@ -259,6 +343,22 @@ export function AdminPanel({ user: adminUser }: { user: User }) {
         </>}
         {section === "platform" && <div className="admin-section-grid">
           <form className="content-card stack-form" onSubmit={saveRates}><div className="eyebrow">PRICING CONTROLS</div><h2>Daily event pricing</h2><p className="muted small-copy">Rates are applied per event day when an event is created.</p>{settings.map((setting) => <label key={setting.key}>{settingNames[setting.key] ?? setting.key}<input type="number" min="0" max="1000000000" step="0.01" required value={rates[setting.key] ?? ""} onChange={(event) => setRates({ ...rates, [setting.key]: event.target.value })} /><small className="muted">Current rate: {formatMoney(setting.value)}</small></label>)}<button className="button button-dark">Save daily rates</button></form>
+          <form className="content-card stack-form" onSubmit={(event) => void saveSubscriptionPlan(event)}>
+            <div className="eyebrow">SUBSCRIPTION PRICING</div><h2>Organization plans</h2>
+            <label>Edit plan<select value={editingPlanId} onChange={(event) => selectPlan(event.target.value)}>
+              <option value="">Create a new plan</option>
+              {subscriptionPlans.map((plan) => <option key={plan.id} value={plan.id}>{plan.name}{plan.active ? "" : " (inactive)"}</option>)}
+            </select></label>
+            <label>Plan name<input required minLength={2} maxLength={100} value={planDraft.name} onChange={(event) => setPlanDraft({ ...planDraft, name: event.target.value })} /></label>
+            <label>Description<input maxLength={500} value={planDraft.description} onChange={(event) => setPlanDraft({ ...planDraft, description: event.target.value })} /></label>
+            <label>Price (GHS)<input type="number" min="0" step="0.01" required value={planDraft.price} onChange={(event) => setPlanDraft({ ...planDraft, price: event.target.value })} /></label>
+            <label>Billing interval<select value={planDraft.interval} onChange={(event) => setPlanDraft({ ...planDraft, interval: event.target.value as typeof planDraft.interval })}><option value="MONTHLY">Monthly</option><option value="YEARLY">Yearly</option></select></label>
+            <label>Included features<input value={planDraft.features} onChange={(event) => setPlanDraft({ ...planDraft, features: event.target.value })} placeholder="Feature one, Feature two" /><small className="muted">Separate features with commas.</small></label>
+            <label>Maximum events<input type="number" min="1" step="1" value={planDraft.maxEvents} onChange={(event) => setPlanDraft({ ...planDraft, maxEvents: event.target.value })} /><small className="muted">Leave empty for no limit.</small></label>
+            <label>Maximum organization members<input type="number" min="1" step="1" value={planDraft.maxMembers} onChange={(event) => setPlanDraft({ ...planDraft, maxMembers: event.target.value })} /><small className="muted">Leave empty for no limit.</small></label>
+            <label className="checkbox-label"><input type="checkbox" checked={planDraft.active} onChange={(event) => setPlanDraft({ ...planDraft, active: event.target.checked })} /> Available for new subscriptions</label>
+            <button className="button button-dark">{editingPlanId ? "Save plan changes" : "Create subscription plan"}</button>
+          </form>
           <div className="content-card"><div className="eyebrow">ORGANIZATION DIRECTORY</div><h2>Organizations</h2><form className="inline-form admin-inline-form" onSubmit={createOrganization}><input aria-label="Organization name" required minLength={2} value={organizationName} onChange={(event) => setOrganizationName(event.target.value)} placeholder="New organization" /><button className="button button-dark">Create</button></form><div className="admin-directory-list">{organizations.map((organization) => <article className="admin-list-item" key={organization.id}><strong>{organization.name}</strong><small>/{organization.slug}</small></article>)}{!organizations.length && <div className="empty-note">No organizations created yet.</div>}</div></div>
           <section className="content-card admin-service-detail"><div className="eyebrow">SERVICE DIAGNOSTICS</div><h2>Provider health</h2>{providerHealth ? <><div className="provider-grid">{Object.entries(providerHealth.providers).map(([name, status]) => <article className="admin-list-item" key={name}><strong>{name.replace(/([A-Z])/g, " $1")}</strong><small className={`health-label ${status}`}>{status.replaceAll("_", " ")}</small></article>)}</div><div className="stat-grid">{Object.entries(providerHealth.operations).map(([name, value]) => <div className="stat-card" key={name}><span className="stat-label">{name.replaceAll(/([A-Z])/g, " $1")}</span><strong>{value}</strong></div>)}</div><h3>Recent provider checks</h3>{Object.entries(providerHealth.history).map(([provider, checks]) => <div className="admin-list-item" key={provider}><strong>{provider}</strong>{checks.map((check, index) => <small key={`${check.checkedAt}-${index}`}>{check.status.replaceAll("_", " ")} · {check.details} · <time dateTime={check.checkedAt}>{new Date(check.checkedAt).toLocaleString()}</time></small>)}</div>)}<p className="muted small-copy">Provider readiness reflects configuration and database connectivity, not a live delivery test.</p></> : <CubeLoader label="Providers" />}</section>
         </div>}

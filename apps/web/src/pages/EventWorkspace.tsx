@@ -8,6 +8,7 @@ import { getEventProduct } from "../products";
 import { GeneralEventWorkspace } from "./GeneralEventWorkspace";
 import { VotingEventWorkspace } from "./VotingEventWorkspace";
 import { WeddingEventWorkspace } from "./WeddingEventWorkspace";
+import { WeddingChecklistPanel, WeddingSeatingPanel, WeddingWebsitePanel } from "./WeddingTools";
 import type { AnalyticsData, Category, EventData, Guest, WorkspaceData } from "./workspace-types";
 
 const emptyData: WorkspaceData = {
@@ -19,7 +20,10 @@ const tabsByEventType = {
     ["overview", "Overview"],
     ["guests", "Guests"],
     ["programme", "Programme"],
+    ["checklist", "Checklist"],
+    ["seating", "Seating"],
     ["wedding", "Wedding details"],
+    ["website", "Website & invites"],
     ["updates", "Updates"],
     ["team", "Event team"],
     ["operations", "Operations"],
@@ -59,12 +63,12 @@ export function EventWorkspace({ user }: { user: User }) {
       if (current.type === "WEDDING") {
         const [guests, budget, vendors, registry, sessions] = await Promise.all([
           api<{ guests: Guest[] }>(`/api/events/${eventId}/guests`),
-          api<{ budget: WorkspaceData["budget"] }>(`/api/events/${eventId}/budget`),
+          api<{ items: WorkspaceData["budget"] }>(`/api/events/${eventId}/budget`),
           api<{ vendors: WorkspaceData["vendors"] }>(`/api/events/${eventId}/vendors`),
           api<{ items: WorkspaceData["registry"] }>(`/api/events/${eventId}/registry`),
           api<{ sessions: WorkspaceData["sessions"] }>(`/api/events/${eventId}/sessions`),
         ]);
-        Object.assign(nextData, { guests: guests.guests, budget: budget.budget, vendors: vendors.vendors, registry: registry.items, sessions: sessions.sessions });
+        Object.assign(nextData, { guests: guests.guests, budget: budget.items, vendors: vendors.vendors, registry: registry.items, sessions: sessions.sessions });
       } else if (current.type === "VOTING") {
         const { categories } = await api<{ categories: Category[] }>(`/api/events/${eventId}/categories`);
         nextData.categories = categories;
@@ -123,8 +127,11 @@ export function EventWorkspace({ user }: { user: User }) {
   if (!event) return <main className="center-card"><div className="alert alert-error">{error || "Event not found"}</div><Link to="/dashboard" className="button button-outline">Return to workspace</Link></main>;
 
   const activePanel = (() => {
-    if (tab === "guests" && (event.type === "WEDDING" || event.type === "GENERAL")) return <GuestsPanel eventId={event.id} data={data} onRefresh={load} />;
-    if (tab === "programme" && event.type !== "VOTING") return <ProgrammePanel eventId={event.id} data={data} onRefresh={load} />;
+    if (tab === "guests" && (event.type === "WEDDING" || event.type === "GENERAL")) return <GuestsPanel eventId={event.id} data={data} onRefresh={load} isWedding={event.type === "WEDDING"} />;
+    if (tab === "programme" && event.type !== "VOTING") return <ProgrammePanel eventId={event.id} data={data} onRefresh={load} isWedding={event.type === "WEDDING"} />;
+    if (tab === "checklist" && event.type === "WEDDING") return <WeddingChecklistPanel eventId={event.id} />;
+    if (tab === "seating" && event.type === "WEDDING") return <WeddingSeatingPanel eventId={event.id} />;
+    if (tab === "website" && event.type === "WEDDING") return <WeddingWebsitePanel eventId={event.id} slug={event.slug} startDate={event.startDate} endDate={event.endDate} />;
     if (tab === "tickets" && event.type === "GENERAL") return <TicketsPanel eventId={event.id} event={event} data={data} onRefresh={load} />;
     if (tab === "engage" && event.type === "VOTING") return <VotingPanel eventId={event.id} data={data} onRefresh={load} />;
     if (tab === "wedding" && event.type === "WEDDING") return <WeddingPanel eventId={event.id} data={data} onRefresh={load} />;
@@ -237,56 +244,152 @@ function iconForTab(tab: string): string {
   return ({ overview: "01", guests: "02", programme: "03", tickets: "04", engage: "05", wedding: "06", updates: "07", team: "08", operations: "09" } as Record<string, string>)[tab] ?? "00";
 }
 
-function GuestsPanel({ eventId, data, onRefresh }: { eventId: string; data: WorkspaceData; onRefresh: () => void }) {
-  const [form, setForm] = useState({ name: "", phone: "", email: "", plusOnes: 0, dietary: "" });
+function GuestsPanel({ eventId, data, onRefresh, isWedding = false }: { eventId: string; data: WorkspaceData; onRefresh: () => void; isWedding?: boolean }) {
+  type Household = { id: string; name: string; guests: Array<{ id: string; name: string }> };
+  const [form, setForm] = useState({ name: "", phone: "", email: "", plusOnes: 0, dietary: "", householdId: "" });
+  const [households, setHouseholds] = useState<Household[]>([]);
+  const [householdName, setHouseholdName] = useState("");
+  const [filter, setFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [selectedGuestIds, setSelectedGuestIds] = useState<string[]>([]);
   const [result, setResult] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  async function loadHouseholds() {
+    if (!isWedding) return;
+    try {
+      const { households: current } = await api<{ households: Household[] }>(`/api/events/${eventId}/wedding/households`);
+      setHouseholds(current);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not load guest households");
+    }
+  }
+
+  useEffect(() => { void loadHouseholds(); }, [eventId, isWedding]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setBusy(true); setError(""); setResult("");
     try {
-      const response = await api<{ rsvpUrl: string; smsStatus: string }>(`/api/events/${eventId}/guests`, { method: "POST", body: JSON.stringify({ ...form, email: form.email || undefined, plusOnes: Number(form.plusOnes), dietary: form.dietary || undefined }) });
+      const response = await api<{ rsvpUrl: string; smsStatus: string }>(`/api/events/${eventId}/guests`, { method: "POST", body: JSON.stringify({ ...form, householdId: form.householdId || undefined, email: form.email || undefined, plusOnes: Number(form.plusOnes), dietary: form.dietary || undefined }) });
       setResult(`Invite sent (${response.smsStatus.toLowerCase()}). RSVP link: ${response.rsvpUrl}`);
-      setForm({ name: "", phone: "", email: "", plusOnes: 0, dietary: "" });
+      setForm({ name: "", phone: "", email: "", plusOnes: 0, dietary: "", householdId: "" });
       onRefresh();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not add guest"); }
     finally { setBusy(false); }
   }
 
+  async function createHousehold(event: FormEvent) {
+    event.preventDefault();
+    setError("");
+    try {
+      const { household } = await api<{ household: Household }>(`/api/events/${eventId}/wedding/households`, {
+        method: "POST",
+        body: JSON.stringify({ name: householdName }),
+      });
+      setHouseholdName("");
+      await loadHouseholds();
+      setForm((current) => ({ ...current, householdId: household.id }));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not create household");
+    }
+  }
+
+  async function assignHousehold(guestId: string, householdId: string) {
+    setError("");
+    try {
+      await api(`/api/events/${eventId}/wedding/guests/${guestId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ householdId: householdId || null }),
+      });
+      onRefresh();
+      await loadHouseholds();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not update guest household");
+    }
+  }
+
+  async function sendInvitations() {
+    setBusy(true);
+    setError("");
+    setResult("");
+    try {
+      const response = await api<{ invited: number; failed: number }>(`/api/events/${eventId}/wedding/invitations`, {
+        method: "POST",
+        body: JSON.stringify({ guestIds: selectedGuestIds.slice(0, 50) }),
+      });
+      setResult(`${response.invited} invitation${response.invited === 1 ? "" : "s"} sent; ${response.failed} failed.`);
+      setSelectedGuestIds([]);
+      onRefresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not send invitations");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const visibleGuests = data.guests.filter((guest) =>
+    (statusFilter === "ALL" || guest.status === statusFilter) &&
+    `${guest.name} ${guest.email ?? ""} ${guest.phone} ${guest.household?.name ?? ""}`.toLowerCase().includes(filter.toLowerCase()),
+  );
+  const allVisibleSelected = visibleGuests.length > 0 && visibleGuests.every((guest) => selectedGuestIds.includes(guest.id));
+
   return <div className="workspace-body">
     <div className="section-heading"><div><div className="eyebrow">YOUR PEOPLE, ALL TOGETHER</div><h2>Guest list <span className="heading-count">{data.guests.length}</span></h2></div></div>
+    {isWedding && <section className="content-card">
+      <div className="section-heading compact"><div><div className="eyebrow">INVITATIONS & HOUSEHOLDS</div><h3>Organize your guest list</h3></div>
+        <button className="button button-outline" disabled={!selectedGuestIds.length || selectedGuestIds.length > 50 || busy} onClick={() => void sendInvitations()}>Resend to selected ({selectedGuestIds.length})</button>
+      </div>
+      {selectedGuestIds.length > 50 && <div className="alert alert-error" role="alert">Select no more than 50 guests per invitation batch.</div>}
+      <div className="form-row">
+        <label>Search guests<input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Name, phone, email, household" /></label>
+        <label>RSVP status<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="ALL">All responses</option><option value="PENDING">Pending</option><option value="ATTENDING">Attending</option><option value="DECLINED">Declined</option></select></label>
+      </div>
+      <form className="inline-form" onSubmit={(event) => void createHousehold(event)}>
+        <input required maxLength={160} value={householdName} onChange={(event) => setHouseholdName(event.target.value)} placeholder="New household name" />
+        <button className="button button-outline">Create household</button>
+      </form>
+      {households.length > 0 && <div className="admin-directory-list">{households.map((household) => <div className="admin-list-item" key={household.id}><strong>{household.name}</strong><small>{household.guests.length} guest{household.guests.length === 1 ? "" : "s"}</small></div>)}</div>}
+    </section>}
     <div className="two-column-panels guest-layout">
       <section className="content-card"><div className="eyebrow">SEND AN INVITATION</div><h3>Add a guest</h3><p className="muted small-copy">They’ll receive a private RSVP link by SMS.</p><form className="stack-form compact-form" onSubmit={submit}>
         <label>Full name<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Guest name" /></label>
         <label>Phone<input required type="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="+233 24 000 0000" /></label>
         <label>Email <span className="muted">(optional)</span><input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="guest@example.com" /></label>
+        {isWedding && <label>Household<select value={form.householdId} onChange={(e) => setForm({ ...form, householdId: e.target.value })}><option value="">No household</option>{households.map((household) => <option value={household.id} key={household.id}>{household.name}</option>)}</select></label>}
         <div className="form-row"><label>Plus-one allowance<input type="number" min="0" max="20" value={form.plusOnes} onChange={(e) => setForm({ ...form, plusOnes: Number(e.target.value) })} /></label><label>Dietary note<input value={form.dietary} onChange={(e) => setForm({ ...form, dietary: e.target.value })} placeholder="Optional" /></label></div>
         {error && <div className="alert alert-error">{error}</div>}{result && <div className="alert alert-success">{result}</div>}
         <button className="button button-dark" disabled={busy}>{busy ? <CubeLoader label="Invite" compact /> : <>Add guest & invite <span>↗</span></>}</button>
       </form></section>
-      <section className="content-card table-card"><div className="table-scroll"><table><thead><tr><th>GUEST</th><th>RESPONSE</th><th>PLUS-ONES</th><th>DIETARY</th></tr></thead><tbody>
-        {data.guests.map((guest) => <tr key={guest.id}><td><strong>{guest.name}</strong><small>{guest.phone}</small></td><td><span className={`status-pill ${guest.status.toLowerCase()}`}>{guest.status.toLowerCase()}</span></td><td>{guest.plusOnes}</td><td>{guest.dietary || <span className="muted">—</span>}</td></tr>)}
-        {!data.guests.length && <tr><td colSpan={4} className="table-empty">Your guest list is ready when you are.</td></tr>}
+      <section className="content-card table-card"><div className="table-scroll"><table><thead><tr><th>{isWedding && <input aria-label="Select all visible guests" type="checkbox" checked={allVisibleSelected} onChange={(event) => setSelectedGuestIds(event.target.checked ? [...new Set([...selectedGuestIds, ...visibleGuests.map((guest) => guest.id)])] : selectedGuestIds.filter((id) => !visibleGuests.some((guest) => guest.id === id)))} />}</th><th>GUEST</th><th>HOUSEHOLD</th><th>RESPONSE</th><th>INVITATION</th><th>PLUS-ONES</th><th>DIETARY</th></tr></thead><tbody>
+        {visibleGuests.map((guest) => <tr key={guest.id}><td>{isWedding && <input aria-label={`Select ${guest.name}`} type="checkbox" checked={selectedGuestIds.includes(guest.id)} onChange={(event) => setSelectedGuestIds(event.target.checked ? [...selectedGuestIds, guest.id] : selectedGuestIds.filter((id) => id !== guest.id))} />}</td><td><strong>{guest.name}</strong><small>{guest.phone}</small></td><td>{isWedding ? <select aria-label={`Household for ${guest.name}`} value={guest.householdId ?? ""} onChange={(event) => void assignHousehold(guest.id, event.target.value)}><option value="">No household</option>{households.map((household) => <option value={household.id} key={household.id}>{household.name}</option>)}</select> : guest.household?.name ?? "—"}</td><td><span className={`status-pill ${guest.status.toLowerCase()}`}>{guest.status.toLowerCase()}</span></td><td>{guest.invitationSentAt ? formatDate(guest.invitationSentAt) : <span className="muted">Not sent</span>}</td><td>{guest.plusOnes}{guest.plusOnesAllowed !== undefined ? ` / ${guest.plusOnesAllowed} allowed` : ""}</td><td>{guest.dietary || <span className="muted">—</span>}</td></tr>)}
+        {!visibleGuests.length && <tr><td colSpan={7} className="table-empty">{data.guests.length ? "No guests match your filters." : "Your guest list is ready when you are."}</td></tr>}
       </tbody></table></div></section>
     </div>
   </div>;
 }
 
-function ProgrammePanel({ eventId, data, onRefresh }: { eventId: string; data: WorkspaceData; onRefresh: () => void }) {
-  const [form, setForm] = useState({ title: "", startsAt: "", endsAt: "", location: "", speaker: "", description: "" });
+function ProgrammePanel({ eventId, data, onRefresh, isWedding = false }: { eventId: string; data: WorkspaceData; onRefresh: () => void; isWedding?: boolean }) {
+  const [form, setForm] = useState({ title: "", startsAt: "", endsAt: "", location: "", speaker: "", description: "", weddingDayId: "" });
+  const [days, setDays] = useState<Array<{id:string;name:string;date:string;location?:string|null}>>([]);
   const [error, setError] = useState("");
+  useEffect(() => {
+    if (!isWedding) return;
+    api<{days:typeof days}>(`/api/events/${eventId}/wedding/days`)
+      .then(({ days: current }) => setDays(current))
+      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not load wedding days"));
+  }, [eventId, isWedding]);
   async function submit(event: FormEvent) {
     event.preventDefault(); setError("");
     try {
-      await api(`/api/events/${eventId}/sessions`, { method: "POST", body: JSON.stringify({ ...form, startsAt: new Date(form.startsAt).toISOString(), endsAt: new Date(form.endsAt).toISOString(), description: form.description || undefined, location: form.location || undefined, speaker: form.speaker || undefined }) });
-      setForm({ title: "", startsAt: "", endsAt: "", location: "", speaker: "", description: "" }); onRefresh();
+      await api(`/api/events/${eventId}/sessions`, { method: "POST", body: JSON.stringify({ ...form, startsAt: new Date(form.startsAt).toISOString(), endsAt: new Date(form.endsAt).toISOString(), description: form.description || undefined, location: form.location || undefined, speaker: form.speaker || undefined, weddingDayId: form.weddingDayId || undefined }) });
+      setForm({ title: "", startsAt: "", endsAt: "", location: "", speaker: "", description: "", weddingDayId: "" }); onRefresh();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not add session"); }
   }
-  return <div className="workspace-body"><div className="section-heading"><div><div className="eyebrow">A THOUGHTFUL FLOW</div><h2>Programme & sessions</h2></div></div>
-    <div className="two-column-panels"><section className="content-card"><div className="eyebrow">MAKE A MOMENT OF IT</div><h3>Add a session</h3><form className="stack-form compact-form" onSubmit={submit}><label>Session title<input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label><div className="form-row"><label>Starts<input required type="datetime-local" value={form.startsAt} onChange={(e) => setForm({ ...form, startsAt: e.target.value })} /></label><label>Ends<input required type="datetime-local" value={form.endsAt} onChange={(e) => setForm({ ...form, endsAt: e.target.value })} /></label></div><label>Location<input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /></label><label>Speaker<input value={form.speaker} onChange={(e) => setForm({ ...form, speaker: e.target.value })} /></label>{error && <div className="alert alert-error">{error}</div>}<button className="button button-dark">Add to programme ↗</button></form></section>
-      <section className="content-card"><div className="eyebrow">THE RUN OF SHOW</div><h3>{data.sessions.length} scheduled moments</h3><div className="session-list">{data.sessions.map((session) => <article className="session-item" key={session.id}><span className="session-time">{new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(new Date(session.startsAt))}</span><div><strong>{session.title}</strong><small>{session.location || "Location to be announced"}{session.speaker ? ` · ${session.speaker}` : ""}</small></div><span className="session-date">{formatDate(session.startsAt)}</span></article>)}{!data.sessions.length && <div className="empty-note">Your programme is a blank canvas.</div>}</div></section></div>
+  return <div className="workspace-body"><div className="section-heading"><div><div className="eyebrow">A THOUGHTFUL FLOW</div><h2>{isWedding ? "Wedding programme" : "Programme & sessions"}</h2></div></div>
+    <div className="two-column-panels"><section className="content-card"><div className="eyebrow">MAKE A MOMENT OF IT</div><h3>Add a session</h3><form className="stack-form compact-form" onSubmit={submit}><label>Session title<input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>{isWedding && <label>Wedding day<select value={form.weddingDayId} onChange={(e) => setForm({ ...form, weddingDayId: e.target.value })}><option value="">Not assigned to a named day</option>{days.map((day) => <option value={day.id} key={day.id}>{day.name}</option>)}</select></label>}<div className="form-row"><label>Starts<input required type="datetime-local" value={form.startsAt} onChange={(e) => setForm({ ...form, startsAt: e.target.value })} /></label><label>Ends<input required type="datetime-local" value={form.endsAt} onChange={(e) => setForm({ ...form, endsAt: e.target.value })} /></label></div><label>Location<input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /></label><label>Speaker<input value={form.speaker} onChange={(e) => setForm({ ...form, speaker: e.target.value })} /></label>{error && <div className="alert alert-error">{error}</div>}<button className="button button-dark">Add to programme ↗</button></form></section>
+      <section className="content-card"><div className="eyebrow">THE RUN OF SHOW</div><h3>{data.sessions.length} scheduled moments</h3><div className="session-list">{data.sessions.map((session) => <article className="session-item" key={session.id}><span className="session-time">{new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(new Date(session.startsAt))}</span><div><strong>{session.title}</strong><small>{session.location || "Location to be announced"}{session.speaker ? ` · ${session.speaker}` : ""}{isWedding && session.weddingDayId ? ` · ${days.find((day) => day.id === session.weddingDayId)?.name ?? "Wedding day"}` : ""}</small></div><span className="session-date">{formatDate(session.startsAt)}</span></article>)}{!data.sessions.length && <div className="empty-note">Your programme is a blank canvas.</div>}</div></section></div>
   </div>;
 }
 
@@ -338,20 +441,54 @@ function VotingPanel({ eventId, data, onRefresh }: { eventId: string; data: Work
 }
 
 function WeddingPanel({ eventId, data, onRefresh }: { eventId: string; data: WorkspaceData; onRefresh: () => void }) {
-  const [budgetForm, setBudgetForm] = useState({ category: "", estimatedCost: "", actualCost: "" });
-  const [vendorForm, setVendorForm] = useState({ name: "", service: "", phone: "", email: "", agreedCost: "" });
-  const [registryForm, setRegistryForm] = useState({ title: "", url: "", price: "" });
+  const [budgetForm, setBudgetForm] = useState({ category: "", estimatedCost: "", actualCost: "", dueAt: "", vendorId: "", paid: false });
+  const [vendorForm, setVendorForm] = useState({ name: "", service: "", phone: "", email: "", status: "SHORTLISTED", quotedCost: "", agreedCost: "", paidAmount: "", paymentDueAt: "" });
+  const [registryForm, setRegistryForm] = useState({ title: "", category: "", url: "", price: "", quantity: 1 });
   const [error, setError] = useState("");
   async function submit(event: FormEvent, path: string, body: Record<string, unknown>, reset: () => void) {
     event.preventDefault(); setError("");
     try { await api(`/api/events/${eventId}/${path}`, { method: "POST", body: JSON.stringify(body) }); reset(); onRefresh(); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save your details"); }
   }
+  async function updateBudgetPaid(id: string, paid: boolean) {
+    setError("");
+    try {
+      await api(`/api/events/${eventId}/wedding/budget/${id}`, { method: "PATCH", body: JSON.stringify({ paid }) });
+      onRefresh();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update budget payment status"); }
+  }
+  async function updateVendorStatus(id: string, status: string) {
+    setError("");
+    try {
+      await api(`/api/events/${eventId}/wedding/vendors/${id}`, { method: "PATCH", body: JSON.stringify({ status }) });
+      onRefresh();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update vendor status"); }
+  }
   return <div className="workspace-body"><div className="section-heading"><div><div className="eyebrow">THE DETAILS THAT MAKE IT YOURS</div><h2>Wedding planning</h2></div></div>{error && <div className="alert alert-error">{error}</div>}
     <div className="wedding-grid">
-      <section className="content-card"><div className="eyebrow">KEEP EVERY PENNY IN VIEW</div><h3>Budget tracker</h3><form className="stack-form compact-form" onSubmit={(e) => void submit(e, "budget", { category: budgetForm.category, estimatedCost: Number(budgetForm.estimatedCost), actualCost: budgetForm.actualCost ? Number(budgetForm.actualCost) : undefined }, () => setBudgetForm({ category: "", estimatedCost: "", actualCost: "" }))}><label>Budget category<input required value={budgetForm.category} onChange={(e) => setBudgetForm({ ...budgetForm, category: e.target.value })} placeholder="Venue, catering..." /></label><div className="form-row"><label>Estimated cost<input type="number" min="0" step="0.01" required value={budgetForm.estimatedCost} onChange={(e) => setBudgetForm({ ...budgetForm, estimatedCost: e.target.value })} /></label><label>Actual cost<input type="number" min="0" step="0.01" value={budgetForm.actualCost} onChange={(e) => setBudgetForm({ ...budgetForm, actualCost: e.target.value })} /></label></div><button className="button button-outline">Add budget item</button></form><div className="mini-list">{data.budget.map((item) => <div key={item.id}><span>{item.category}</span><strong>{formatMoney(item.actualCost ?? item.estimatedCost)}</strong></div>)}{!data.budget.length && <small className="muted">Your budget items will appear here.</small>}</div></section>
-      <section className="content-card"><div className="eyebrow">GOOD PEOPLE, GOOD WORK</div><h3>Vendor directory</h3><form className="stack-form compact-form" onSubmit={(e) => void submit(e, "vendors", { ...vendorForm, agreedCost: vendorForm.agreedCost ? Number(vendorForm.agreedCost) : undefined, phone: vendorForm.phone || undefined, email: vendorForm.email || undefined }, () => setVendorForm({ name: "", service: "", phone: "", email: "", agreedCost: "" }))}><div className="form-row"><label>Name<input required value={vendorForm.name} onChange={(e) => setVendorForm({ ...vendorForm, name: e.target.value })} /></label><label>Service<input required value={vendorForm.service} onChange={(e) => setVendorForm({ ...vendorForm, service: e.target.value })} /></label></div><div className="form-row"><label>Phone<input value={vendorForm.phone} onChange={(e) => setVendorForm({ ...vendorForm, phone: e.target.value })} /></label><label>Agreed cost<input type="number" min="0" step="0.01" value={vendorForm.agreedCost} onChange={(e) => setVendorForm({ ...vendorForm, agreedCost: e.target.value })} /></label></div><button className="button button-outline">Add vendor</button></form><div className="mini-list">{data.vendors.map((vendor) => <div key={vendor.id}><span>{vendor.name} <small>{vendor.service}</small></span><strong>{vendor.agreedCost ? formatMoney(vendor.agreedCost) : "—"}</strong></div>)}{!data.vendors.length && <small className="muted">Keep your trusted vendors close.</small>}</div></section>
-      <section className="content-card registry-card"><div className="eyebrow">A LITTLE SOMETHING LOVELY</div><h3>Gift registry</h3><form className="inline-form" onSubmit={(e) => void submit(e, "registry", { title: registryForm.title, url: registryForm.url || undefined, price: registryForm.price ? Number(registryForm.price) : undefined }, () => setRegistryForm({ title: "", url: "", price: "" }))}><input required value={registryForm.title} onChange={(e) => setRegistryForm({ ...registryForm, title: e.target.value })} placeholder="Registry item" /><input value={registryForm.url} onChange={(e) => setRegistryForm({ ...registryForm, url: e.target.value })} placeholder="Item link" /><button className="button button-outline">Add item</button></form><div className="mini-list">{data.registry.map((item) => <div key={item.id}><span>{item.url ? <a href={item.url} target="_blank" rel="noreferrer">{item.title} ↗</a> : item.title}</span><strong>{item.price ? formatMoney(item.price) : "—"}</strong></div>)}{!data.registry.length && <small className="muted">Your registry is ready to fill.</small>}</div></section>
+      <section className="content-card"><div className="eyebrow">KEEP EVERY PENNY IN VIEW</div><h3>Budget tracker</h3><form className="stack-form compact-form" onSubmit={(e) => void submit(e, "budget", { category: budgetForm.category, estimatedCost: Number(budgetForm.estimatedCost), actualCost: budgetForm.actualCost ? Number(budgetForm.actualCost) : undefined, dueAt: budgetForm.dueAt ? new Date(budgetForm.dueAt).toISOString() : undefined, vendorId: budgetForm.vendorId || undefined, paid: budgetForm.paid }, () => setBudgetForm({ category: "", estimatedCost: "", actualCost: "", dueAt: "", vendorId: "", paid: false }))}>
+        <label>Budget category<input required value={budgetForm.category} onChange={(e) => setBudgetForm({ ...budgetForm, category: e.target.value })} placeholder="Venue, catering..." /></label>
+        <div className="form-row"><label>Estimated cost<input type="number" min="0" step="0.01" required value={budgetForm.estimatedCost} onChange={(e) => setBudgetForm({ ...budgetForm, estimatedCost: e.target.value })} /></label><label>Actual cost<input type="number" min="0" step="0.01" value={budgetForm.actualCost} onChange={(e) => setBudgetForm({ ...budgetForm, actualCost: e.target.value })} /></label></div>
+        <div className="form-row"><label>Due date<input type="date" value={budgetForm.dueAt} onChange={(e) => setBudgetForm({ ...budgetForm, dueAt: e.target.value })} /></label><label>Vendor<select value={budgetForm.vendorId} onChange={(e) => setBudgetForm({ ...budgetForm, vendorId: e.target.value })}><option value="">No vendor</option>{data.vendors.map((vendor) => <option value={vendor.id} key={vendor.id}>{vendor.name}</option>)}</select></label></div>
+        <label className="checkbox-label"><input type="checkbox" checked={budgetForm.paid} onChange={(e) => setBudgetForm({ ...budgetForm, paid: e.target.checked })} />Already paid</label>
+        <button className="button button-outline">Add budget item</button></form>
+        <div className="mini-list">{data.budget.map((item) => <div key={item.id}><span>{item.category}<small>{item.dueAt ? `Due ${formatDate(item.dueAt)}` : "No due date"}{item.vendorId ? ` · ${data.vendors.find((vendor) => vendor.id === item.vendorId)?.name ?? "Vendor"}` : ""}</small><label className="checkbox-label"><input type="checkbox" checked={item.paid} onChange={(e) => void updateBudgetPaid(item.id, e.target.checked)} />Paid</label></span><strong>{formatMoney(item.actualCost ?? item.estimatedCost)}</strong></div>)}{!data.budget.length && <small className="muted">Your budget items will appear here.</small>}</div>
+      </section>
+      <section className="content-card"><div className="eyebrow">GOOD PEOPLE, GOOD WORK</div><h3>Vendor directory</h3><form className="stack-form compact-form" onSubmit={(e) => void submit(e, "vendors", { ...vendorForm, quotedCost: vendorForm.quotedCost ? Number(vendorForm.quotedCost) : undefined, agreedCost: vendorForm.agreedCost ? Number(vendorForm.agreedCost) : undefined, paidAmount: vendorForm.paidAmount ? Number(vendorForm.paidAmount) : undefined, paymentDueAt: vendorForm.paymentDueAt ? new Date(vendorForm.paymentDueAt).toISOString() : undefined, phone: vendorForm.phone || undefined, email: vendorForm.email || undefined }, () => setVendorForm({ name: "", service: "", phone: "", email: "", status: "SHORTLISTED", quotedCost: "", agreedCost: "", paidAmount: "", paymentDueAt: "" }))}>
+        <div className="form-row"><label>Name<input required value={vendorForm.name} onChange={(e) => setVendorForm({ ...vendorForm, name: e.target.value })} /></label><label>Service<input required value={vendorForm.service} onChange={(e) => setVendorForm({ ...vendorForm, service: e.target.value })} /></label></div>
+        <div className="form-row"><label>Phone<input value={vendorForm.phone} onChange={(e) => setVendorForm({ ...vendorForm, phone: e.target.value })} /></label><label>Status<select value={vendorForm.status} onChange={(e) => setVendorForm({ ...vendorForm, status: e.target.value })}>{["SHORTLISTED", "CONTACTED", "QUOTED", "BOOKED", "COMPLETED", "CANCELLED"].map((status) => <option key={status} value={status}>{status.toLowerCase().replace("_", " ")}</option>)}</select></label></div>
+        <div className="form-row"><label>Quote<input type="number" min="0" step="0.01" value={vendorForm.quotedCost} onChange={(e) => setVendorForm({ ...vendorForm, quotedCost: e.target.value })} /></label><label>Agreed cost<input type="number" min="0" step="0.01" value={vendorForm.agreedCost} onChange={(e) => setVendorForm({ ...vendorForm, agreedCost: e.target.value })} /></label></div>
+        <div className="form-row"><label>Paid to date<input type="number" min="0" step="0.01" value={vendorForm.paidAmount} onChange={(e) => setVendorForm({ ...vendorForm, paidAmount: e.target.value })} /></label><label>Payment due<input type="date" value={vendorForm.paymentDueAt} onChange={(e) => setVendorForm({ ...vendorForm, paymentDueAt: e.target.value })} /></label></div>
+        <button className="button button-outline">Add vendor</button></form>
+        <div className="mini-list">{data.vendors.map((vendor) => <div key={vendor.id}><span>{vendor.name} <small>{vendor.service} · Quote {vendor.quotedCost ? formatMoney(vendor.quotedCost) : "—"} · Paid {vendor.paidAmount ? formatMoney(vendor.paidAmount) : formatMoney(0)}</small><small>{vendor.paymentDueAt ? `Payment due ${formatDate(vendor.paymentDueAt)}` : ""}</small></span><div><select aria-label={`Status for ${vendor.name}`} value={vendor.status ?? "SHORTLISTED"} onChange={(e) => void updateVendorStatus(vendor.id, e.target.value)}>{["SHORTLISTED", "CONTACTED", "QUOTED", "BOOKED", "COMPLETED", "CANCELLED"].map((status) => <option key={status} value={status}>{status.toLowerCase().replace("_", " ")}</option>)}</select><strong>{vendor.agreedCost ? formatMoney(vendor.agreedCost) : "—"}</strong></div></div>)}{!data.vendors.length && <small className="muted">Keep your trusted vendors close.</small>}</div>
+      </section>
+      <section className="content-card registry-card"><div className="eyebrow">A LITTLE SOMETHING LOVELY</div><h3>Gift registry</h3><form className="stack-form compact-form" onSubmit={(e) => void submit(e, "registry", { title: registryForm.title, category: registryForm.category || undefined, url: registryForm.url || undefined, price: registryForm.price ? Number(registryForm.price) : undefined, quantity: Number(registryForm.quantity) }, () => setRegistryForm({ title: "", category: "", url: "", price: "", quantity: 1 }))}>
+        <label>Gift or contribution<input required value={registryForm.title} onChange={(e) => setRegistryForm({ ...registryForm, title: e.target.value })} placeholder="Registry item" /></label>
+        <div className="form-row"><label>Category<input value={registryForm.category} onChange={(e) => setRegistryForm({ ...registryForm, category: e.target.value })} placeholder="Home, travel..." /></label><label>Quantity<input type="number" min="1" max="1000" required value={registryForm.quantity} onChange={(e) => setRegistryForm({ ...registryForm, quantity: Number(e.target.value) })} /></label></div>
+        <div className="form-row"><label>Item link<input type="url" value={registryForm.url} onChange={(e) => setRegistryForm({ ...registryForm, url: e.target.value })} /></label><label>Price<input type="number" min="0" step="0.01" value={registryForm.price} onChange={(e) => setRegistryForm({ ...registryForm, price: e.target.value })} /></label></div>
+        <button className="button button-outline">Add item</button></form>
+        <div className="mini-list">{data.registry.map((item) => <div key={item.id}><span>{item.url ? <a href={item.url} target="_blank" rel="noreferrer">{item.title} ↗</a> : item.title}<small>{item.category || "Gift"} · {item.claimedCount ?? 0} / {item.quantity ?? 1} claimed</small></span><strong>{item.price ? formatMoney(item.price) : "—"}</strong></div>)}{!data.registry.length && <small className="muted">Your registry is ready to fill.</small>}</div>
+      </section>
     </div>
   </div>;
 }

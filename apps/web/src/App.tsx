@@ -10,13 +10,14 @@ import { Pass } from "./pages/Pass";
 import { Scanner } from "./pages/Scanner";
 import { PaymentReturn } from "./pages/PaymentReturn";
 import { Signup } from "./pages/Signup";
-import { ForgotPassword, ResetPassword, TwoFactorChallenge } from "./pages/AccountSecurity";
+import { ForgotPassword, ResetPassword, SessionManagement, TwoFactorChallenge } from "./pages/AccountSecurity";
 import { TwoFactorSetup } from "./pages/TwoFactorSetup";
 import { AboutPage, ContactPage, EventsPage, HelpPage, PricingPage, PrivacyPage, PublicHeader, TermsPage } from "./pages/PublicPages";
 import { CubeLoader } from "./components/CubeLoader";
 import { SmsOptOut } from "./pages/SmsOptOut";
 import { ProductLanding } from "./pages/ProductLanding";
 import { AdminPanel } from "./pages/AdminPanel";
+import { OrganizationSettings } from "./pages/OrganizationSettings";
 import { eventProducts, getProductReturnPath } from "./products";
 
 export interface User {
@@ -24,6 +25,7 @@ export interface User {
   name: string;
   email: string;
   role: "ADMIN" | "EVENT_MANAGER" | "CHECK_IN_STAFF";
+  mfaEnabled?: boolean;
 }
 
 export function App() {
@@ -56,14 +58,19 @@ export function App() {
     return <main className="loading-screen"><CubeLoader label="EventFlow" /></main>;
   }
 
+  if (user?.role === "ADMIN" && !user.mfaEnabled && location.pathname !== "/security/two-factor") {
+    return <Navigate to="/security/two-factor?next=%2Fadmin" replace />;
+  }
+
   return (
     <Routes>
       <Route path="/login" element={user ? <Navigate to={getProductReturnPath(location.search)} replace /> : <Login onLogin={setUser} />} />
       <Route path="/signup" element={user ? <Navigate to={getProductReturnPath(location.search)} replace /> : <Signup onSignup={setUser} />} />
       <Route path="/forgot-password" element={user ? <Navigate to="/dashboard" replace /> : <ForgotPassword />} />
       <Route path="/reset-password" element={<ResetPassword />} />
+      <Route path="/security/sessions" element={user ? <SessionManagement /> : <Navigate to="/login" replace />} />
       <Route path="/two-factor" element={user ? <Navigate to={getProductReturnPath(location.search)} replace /> : <TwoFactorChallenge onLogin={setUser} />} />
-      <Route path="/security/two-factor" element={user ? <TwoFactorSetup /> : <Navigate to="/login" replace />} />
+      <Route path="/security/two-factor" element={user ? <TwoFactorSetup user={user} onUserUpdate={setUser} /> : <Navigate to="/login" replace />} />
       <Route path="/sms-opt-out" element={<SmsOptOut />} />
       <Route path="/events" element={<EventsPage />} />
       <Route path="/pricing" element={<PricingPage />} />
@@ -84,7 +91,15 @@ export function App() {
       />
       <Route
         path="/admin"
-        element={user?.role === "ADMIN" ? <AdminPanel user={user} /> : <Navigate to={user ? "/dashboard" : "/login"} replace />}
+        element={user?.role === "ADMIN"
+          ? user.mfaEnabled
+            ? <AdminPanel user={user} />
+            : <Navigate to="/security/two-factor?next=%2Fadmin" replace />
+          : <Navigate to={user ? "/dashboard" : "/login"} replace />}
+      />
+      <Route
+        path="/organizations"
+        element={user ? <OrganizationSettings userRole={user.role} /> : <Navigate to="/login" replace />}
       />
       <Route path="/dashboard" element={user ? <Dashboard user={user} onLogout={() => setUser(null)} /> : <Navigate to="/login" replace />} />
       {eventProducts.map((product) => (

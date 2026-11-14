@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import type { User } from "../App";
@@ -11,9 +11,16 @@ export function Login({ onLogin }: { onLogin: (user: User) => void }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [oidcEnabled, setOidcEnabled] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const returnTo = getProductReturnPath(location.search);
+
+  useEffect(() => {
+    void api<{ enabled: boolean }>("/api/auth/oidc/status")
+      .then(({ enabled }) => setOidcEnabled(enabled))
+      .catch(() => setOidcEnabled(false));
+  }, []);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -50,6 +57,7 @@ export function Login({ onLogin }: { onLogin: (user: User) => void }) {
           <h1>Sign in to EventFlow</h1>
           <p className="muted">Pick up where your good plans left off.</p>
           <form onSubmit={submit} className="stack-form">
+            {oidcEnabled && <a className="button button-outline" href={`/api/auth/oidc/start?next=${encodeURIComponent(returnTo)}`}>Continue with organization SSO</a>}
             <label>Email address<input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" /></label>
             <label>Password<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Your password" /></label>
             {error && <div className="alert alert-error" role="alert">{error}</div>}

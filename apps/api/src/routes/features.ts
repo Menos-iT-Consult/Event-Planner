@@ -5,7 +5,7 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler } from "../lib/async-handler.js";
 import { getRouteParam } from "../lib/route-param.js";
-import { requireAuth, requireEventAccess, requireRole, type AuthenticatedRequest } from "../middleware/auth.js";
+import { requireAdminMfa, requireAuth, requireEventAccess, requireRole, type AuthenticatedRequest } from "../middleware/auth.js";
 import { refundPaystackPayment } from "../services/payments.js";
 import { collectProviderHealth, getProviderHealthHistory } from "../services/health.js";
 import { optOutSms } from "../services/sms-preferences.js";
@@ -272,7 +272,7 @@ featuresPublicRouter.post(
   }),
 );
 
-featuresAdminRouter.use(requireAuth, requireRole(UserRole.ADMIN));
+featuresAdminRouter.use(requireAuth, requireRole(UserRole.ADMIN), requireAdminMfa);
 
 featuresAdminRouter.get(
   "/data-deletion-requests",
@@ -527,7 +527,7 @@ featuresAdminRouter.patch(
 );
 
 export const featuresEventRouter = Router();
-featuresEventRouter.use(requireAuth);
+featuresEventRouter.use(requireAuth, requireAdminMfa);
 
 featuresEventRouter.get(
   "/:eventId/message-schedules",

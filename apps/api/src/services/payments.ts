@@ -7,6 +7,58 @@ interface PaystackInitializeResponse {
   data?: { authorization_url?: string; access_code?: string; reference?: string };
 }
 
+interface MoolrePaymentLinkResponse {
+  status: number | string;
+  code?: string;
+  message?: string | null;
+  data?: { authorization_url?: string; reference?: string };
+}
+
+export async function initializeMoolrePayment(input: {
+  amount: string;
+  reference: string;
+  metadata: Record<string, string | number>;
+}): Promise<{ authorizationUrl: string; reference: string }> {
+  if (
+    !config.MOOLRE_API_USER ||
+    !config.MOOLRE_API_PUBKEY ||
+    !config.MOOLRE_ACCOUNT_NUMBER ||
+    !config.MOOLRE_BILLING_EMAIL
+  ) {
+    throw new Error("Moolre billing is not configured");
+  }
+  const response = await fetch(`${config.MOOLRE_API_ORIGIN}/embed/link`, {
+    method: "POST",
+    headers: {
+      "X-API-USER": config.MOOLRE_API_USER,
+      "X-API-PUBKEY": config.MOOLRE_API_PUBKEY,
+      "content-type": "application/json",
+    },
+    signal: AbortSignal.timeout(15_000),
+    body: JSON.stringify({
+      type: 1,
+      amount: input.amount,
+      email: config.MOOLRE_BILLING_EMAIL,
+      externalref: input.reference,
+      callback: `${config.API_ORIGIN}/api/webhooks/moolre`,
+      redirect: `${config.WEB_ORIGIN}/organizations?subscription=${encodeURIComponent(input.reference)}`,
+      reusable: "0",
+      expiration_time: 60,
+      currency: "GHS",
+      accountnumber: config.MOOLRE_ACCOUNT_NUMBER,
+      metadata: input.metadata,
+    }),
+  });
+  const result = await response.json() as MoolrePaymentLinkResponse;
+  if (!response.ok || String(result.status) !== "1" || !result.data?.authorization_url) {
+    throw new Error(`Moolre payment initialization failed: ${result.message ?? response.statusText}`);
+  }
+  return {
+    authorizationUrl: result.data.authorization_url,
+    reference: result.data.reference ?? input.reference,
+  };
+}
+
 export async function initializePaystackPayment(input: {
   email: string;
   amountMinor: number;

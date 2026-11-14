@@ -2,14 +2,24 @@ import { Router } from "express";
 import { rateLimit } from "express-rate-limit";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
-import { createHmac, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { createOpaqueToken, hashOpaqueToken } from "../lib/tokens.js";
+import { decryptText, encryptText } from "../lib/encryption.js";
+import { config } from "../config.js";
 import { prisma } from "../db.js";
 import { asyncHandler } from "../lib/async-handler.js";
+import {
+  discoverOidcProvider,
+  exchangeOidcCode,
+  getAllowedOidcEmailDomains,
+  isOidcConfigured,
+  isSafeReturnPath,
+} from "../services/oidc.js";
 import {
   clearSessionCookie,
   createSessionToken,
   requireAuth,
+  revokeSessionToken,
   setSessionCookie,
   type AuthenticatedRequest,
 } from "../middleware/auth.js";
@@ -21,6 +31,9 @@ const credentialsSchema = z.object({
 });
 
 const base32Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+const totpEncryptionKey = createHash("sha256")
+  .update(config.MFA_ENCRYPTION_KEY ?? config.JWT_SECRET)
+  .digest();
 
 function createBase32Secret(bytes = 20): string {
   const value = randomBytes(bytes);
@@ -69,6 +82,179 @@ function verifyTotp(secret: string, code: string, now = Date.now()): boolean {
 }
 
 export const authRouter = Router();
+
+const oidcBrowserCookie = "eventflow_oidc";
+
+authRouter.get("/oidc/status", (_request, response) => {
+  response.json({ enabled: isOidcConfigured() });
+});
+
+authRouter.get(
+  "/oidc/start",
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 20,
+    standardHeaders: "draft-7",
+    legacyHeaders: false,
+  }),
+  asyncHandler(async (request, response) => {
+    const discovery = await discoverOidcProvider();
+    const state = createOpaqueToken();
+    const browserToken = createOpaqueToken();
+    const nonce = createOpaqueToken();
+    const codeVerifier = createOpaqueToken();
+    const codeChallenge = createHash("sha256").update(codeVerifier).digest("base64url");
+    const expiresAt = new Date(Date.now() + 10 * 60_000);
+    await prisma.oidcLoginRequest.create({
+      data: {
+        stateHash: hashOpaqueToken(state),
+        browserTokenHash: hashOpaqueToken(browserToken),
+        nonceHash: hashOpaqueToken(nonce),
+        codeVerifier: encryptText(codeVerifier, totpEncryptionKey),
+        returnTo: isSafeReturnPath(typeof request.query.next === "string" ? request.query.next : undefined),
+        expiresAt,
+      },
+    });
+    response.cookie(oidcBrowserCookie, browserToken, {
+      httpOnly: true,
+      secure: config.COOKIE_SECURE,
+      sameSite: "lax",
+      path: "/api/auth/oidc",
+      maxAge: 10 * 60_000,
+    });
+    const authorization = new URL(discovery.authorization_endpoint);
+    authorization.search = new URLSearchParams({
+      client_id: config.OIDC_CLIENT_ID!,
+      response_type: "code",
+      scope: "openid email profile",
+      redirect_uri: `${config.API_ORIGIN}/api/auth/oidc/callback`,
+      state,
+      nonce,
+      code_challenge: codeChallenge,
+      code_challenge_method: "S256",
+    }).toString();
+    response.redirect(302, authorization.toString());
+  }),
+);
+
+authRouter.get(
+  "/oidc/callback",
+  asyncHandler(async (request, response) => {
+    const loginUrl = new URL("/login", config.WEB_ORIGIN);
+    if (typeof request.query.error === "string") {
+      loginUrl.searchParams.set("error", "sso_failed");
+      response.clearCookie(oidcBrowserCookie, {
+        httpOnly: true,
+        secure: config.COOKIE_SECURE,
+        sameSite: "lax",
+        path: "/api/auth/oidc",
+      });
+      response.redirect(302, loginUrl.toString());
+      return;
+    }
+
+    const input = z.object({
+      state: z.string().min(20).max(200),
+      code: z.string().min(1).max(4000),
+    }).safeParse(request.query);
+    const browserToken = request.cookies?.[oidcBrowserCookie] as string | undefined;
+    if (!input.success || !browserToken) {
+      response.status(400).json({ error: "OIDC login response is invalid or expired" });
+      return;
+    }
+    const loginRequest = await prisma.oidcLoginRequest.findFirst({
+      where: {
+        stateHash: hashOpaqueToken(input.data.state),
+        browserTokenHash: hashOpaqueToken(browserToken),
+        expiresAt: { gt: new Date() },
+      },
+    });
+    if (!loginRequest) {
+      response.status(400).json({ error: "OIDC login response is invalid or expired" });
+      return;
+    }
+    const consumed = await prisma.oidcLoginRequest.deleteMany({
+      where: { id: loginRequest.id, expiresAt: { gt: new Date() } },
+    });
+    response.clearCookie(oidcBrowserCookie, {
+      httpOnly: true,
+      secure: config.COOKIE_SECURE,
+      sameSite: "lax",
+      path: "/api/auth/oidc",
+    });
+    if (consumed.count !== 1) {
+      response.status(400).json({ error: "OIDC login response has already been used" });
+      return;
+    }
+
+    const claims = await exchangeOidcCode({
+      code: input.data.code,
+      codeVerifier: decryptText(loginRequest.codeVerifier, totpEncryptionKey),
+      nonce: loginRequest.nonceHash,
+      redirectUri: `${config.API_ORIGIN}/api/auth/oidc/callback`,
+    });
+    if (claims.email_verified !== true || typeof claims.email !== "string") {
+      response.redirect(302, `${loginUrl.toString()}?error=sso_account_unavailable`);
+      return;
+    }
+    const email = claims.email.trim().toLowerCase();
+    const allowedDomains = getAllowedOidcEmailDomains();
+    const emailDomain = email.split("@")[1];
+    if (!emailDomain || (allowedDomains.length > 0 && !allowedDomains.includes(emailDomain))) {
+      response.redirect(302, `${loginUrl.toString()}?error=sso_account_unavailable`);
+      return;
+    }
+
+    const existingIdentity = await prisma.externalIdentity.findUnique({
+      where: { issuer_subject: { issuer: claims.iss!, subject: claims.sub! } },
+      include: { user: { select: { id: true, name: true, email: true, role: true } } },
+    });
+    let user = existingIdentity?.user;
+    if (!user) {
+      const emailAccount = await prisma.user.findUnique({
+        where: { email },
+        select: { id: true, name: true, email: true, role: true, emailVerifiedAt: true },
+      });
+      if (!emailAccount) {
+        response.redirect(302, `${loginUrl.toString()}?error=sso_account_unavailable`);
+        return;
+      }
+      await prisma.$transaction(async (transaction) => {
+        await transaction.externalIdentity.create({
+          data: {
+            issuer: claims.iss!,
+            subject: claims.sub!,
+            userId: emailAccount.id,
+          },
+        });
+        if (!emailAccount.emailVerifiedAt) {
+          await transaction.user.update({
+            where: { id: emailAccount.id },
+            data: { emailVerifiedAt: new Date() },
+          });
+        }
+        if (typeof claims.name === "string" && claims.name.trim()) {
+          await transaction.user.update({
+            where: { id: emailAccount.id },
+            data: { name: claims.name.trim().slice(0, 120) },
+          });
+        }
+      });
+      user = {
+        ...emailAccount,
+        name: typeof claims.name === "string" && claims.name.trim()
+          ? claims.name.trim().slice(0, 120)
+          : emailAccount.name,
+      };
+    }
+
+    await prisma.loginAttempt.create({
+      data: { email: user.email, userId: user.id, success: true, reason: "OIDC" },
+    });
+    setSessionCookie(response, await createSessionToken(user, request));
+    response.redirect(302, new URL(loginRequest.returnTo, config.WEB_ORIGIN).toString());
+  }),
+);
 
 authRouter.post(
   "/forgot-password",
@@ -124,10 +310,20 @@ authRouter.post(
       response.status(400).json({ error: "Current password is incorrect" });
       return;
     }
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { passwordHash: await bcrypt.hash(input.newPassword, 12) },
-    });
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: user.id },
+        data: { passwordHash: await bcrypt.hash(input.newPassword, 12) },
+      }),
+      prisma.userSession.updateMany({
+        where: {
+          userId: user.id,
+          id: { not: response.locals.sessionId as string },
+          revokedAt: null,
+        },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
     response.json({ changed: true });
   }),
 );
@@ -162,16 +358,32 @@ authRouter.post(
     }
 
     const passwordHash = await bcrypt.hash(input.password, 12);
-    const user = await prisma.user.create({
-      data: {
-        name: input.name,
-        email: input.email,
-        passwordHash,
-        role: "EVENT_MANAGER",
-      },
-      select: { id: true, name: true, email: true, role: true },
+    const user = await prisma.$transaction(async (transaction) => {
+      const created = await transaction.user.create({
+        data: {
+          name: input.name,
+          email: input.email,
+          passwordHash,
+          role: "EVENT_MANAGER",
+          organization: {
+            create: {
+              name: `${input.name}'s organization`,
+              slug: `personal-${randomBytes(8).toString("hex")}`,
+            },
+          },
+        },
+        select: { id: true, name: true, email: true, role: true, organizationId: true },
+      });
+      await transaction.organizationMembership.create({
+        data: {
+          userId: created.id,
+          organizationId: created.organizationId!,
+          role: "OWNER",
+        },
+      });
+      return created;
     });
-    setSessionCookie(response, createSessionToken(user));
+    setSessionCookie(response, await createSessionToken(user, request));
     response.status(201).json({ user });
   }),
 );
@@ -194,31 +406,76 @@ authRouter.post(
       ? await bcrypt.compare(credentials.password, user.passwordHash)
       : false;
     if (!user || !passwordMatches) {
+      await prisma.loginAttempt.create({
+        data: {
+          email: credentials.email,
+          userId: user?.id,
+          success: false,
+          userAgent: request.get("user-agent")?.slice(0, 1000),
+          reason: "INVALID_CREDENTIALS",
+        },
+      });
       response.status(401).json({ error: "Email or password is incorrect" });
       return;
     }
     const twoFactor = await prisma.twoFactorCredential.findUnique({ where: { userId: user.id } });
     if (twoFactor?.enabled) {
       const twoFactorCode = credentials.code?.trim().toUpperCase();
-      const totpValid = twoFactorCode ? verifyTotp(twoFactor.secret, twoFactorCode) : false;
-      const backupIndex = twoFactorCode ? twoFactor.backupCodes.findIndex((value) => value === twoFactorCode) : -1;
+      const totpValid = twoFactorCode
+        ? verifyTotp(decryptText(twoFactor.secret, totpEncryptionKey), twoFactorCode)
+        : false;
+      const hashedBackupCode = twoFactorCode ? hashOpaqueToken(twoFactorCode) : "";
+      const backupIndex = twoFactorCode
+        ? twoFactor.backupCodes.findIndex((value) => value === hashedBackupCode || value === twoFactorCode)
+        : -1;
       if (!totpValid && backupIndex < 0) {
+        await prisma.loginAttempt.create({
+          data: {
+            email: credentials.email,
+            userId: user.id,
+            success: false,
+            userAgent: request.get("user-agent")?.slice(0, 1000),
+            reason: "INVALID_MFA",
+          },
+        });
         response.status(401).json({ error: "A valid two-factor authentication code is required", mfaRequired: true });
         return;
       }
+      const remaining = twoFactor.backupCodes.map((value) =>
+        /^[0-9a-f]{64}$/.test(value) ? value : hashOpaqueToken(value),
+      );
       if (backupIndex >= 0) {
-        const remaining = [...twoFactor.backupCodes];
         remaining.splice(backupIndex, 1);
+      }
+      if (backupIndex >= 0 || !twoFactor.secret.startsWith("enc:v1:") ||
+          remaining.some((value, index) => value !== twoFactor.backupCodes[index])) {
         await prisma.twoFactorCredential.update({
           where: { userId: user.id },
-          data: { backupCodes: remaining },
+          data: {
+            secret: encryptText(decryptText(twoFactor.secret, totpEncryptionKey), totpEncryptionKey),
+            backupCodes: remaining,
+          },
         });
       }
     }
 
-    setSessionCookie(response, createSessionToken(user));
+    await prisma.loginAttempt.create({
+      data: {
+        email: credentials.email,
+        userId: user.id,
+        success: true,
+        userAgent: request.get("user-agent")?.slice(0, 1000),
+      },
+    });
+    setSessionCookie(response, await createSessionToken(user, request));
     response.json({
-      user: { id: user.id, name: user.name, email: user.email, role: user.role },
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        mfaEnabled: Boolean(twoFactor?.enabled),
+      },
     });
   }),
 );
@@ -283,12 +540,29 @@ authRouter.post(
   requireAuth,
   asyncHandler(async (request, response) => {
     const authUser = (request as AuthenticatedRequest).user!;
+    const existing = await prisma.twoFactorCredential.findUnique({
+      where: { userId: authUser.id },
+      select: { enabled: true },
+    });
+    if (existing?.enabled) {
+      response.status(409).json({ error: "Two-factor authentication is already enabled" });
+      return;
+    }
     const secret = createBase32Secret();
     const backupCodes = Array.from({ length: 10 }, () => randomBytes(5).toString("hex").slice(0, 10).toUpperCase());
     await prisma.twoFactorCredential.upsert({
       where: { userId: authUser.id },
-      create: { userId: authUser.id, secret, backupCodes },
-      update: { secret, enabled: false, verifiedAt: null, backupCodes },
+      create: {
+        userId: authUser.id,
+        secret: encryptText(secret, totpEncryptionKey),
+        backupCodes: backupCodes.map(hashOpaqueToken),
+      },
+      update: {
+        secret: encryptText(secret, totpEncryptionKey),
+        enabled: false,
+        verifiedAt: null,
+        backupCodes: backupCodes.map(hashOpaqueToken),
+      },
     });
     response.json({ secret, backupCodes });
   }),
@@ -301,14 +575,24 @@ authRouter.post(
     const authUser = (request as AuthenticatedRequest).user!;
     const input = z.object({ code: z.string().regex(/^\d{6}$/) }).parse(request.body);
     const credential = await prisma.twoFactorCredential.findUnique({ where: { userId: authUser.id } });
-    if (!credential || !verifyTotp(credential.secret, input.code)) {
+    if (!credential || !verifyTotp(decryptText(credential.secret, totpEncryptionKey), input.code)) {
       response.status(400).json({ error: "Invalid authentication code" });
       return;
     }
-    await prisma.twoFactorCredential.update({
-      where: { userId: authUser.id },
-      data: { enabled: true, verifiedAt: new Date() },
-    });
+    await prisma.$transaction([
+      prisma.twoFactorCredential.update({
+        where: { userId: authUser.id },
+        data: { enabled: true, verifiedAt: new Date() },
+      }),
+      prisma.userSession.updateMany({
+        where: {
+          userId: authUser.id,
+          id: { not: response.locals.sessionId as string },
+          revokedAt: null,
+        },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
     response.json({ enabled: true });
   }),
 );
@@ -318,6 +602,10 @@ authRouter.post(
   requireAuth,
   asyncHandler(async (request, response) => {
     const authUser = (request as AuthenticatedRequest).user!;
+    if (authUser.role === "ADMIN") {
+      response.status(403).json({ error: "Platform administrators must keep two-factor authentication enabled" });
+      return;
+    }
     const input = z.object({
       password: z.string().min(1).max(200),
     }).parse(request.body);
@@ -326,7 +614,17 @@ authRouter.post(
       response.status(400).json({ error: "Password is incorrect" });
       return;
     }
-    await prisma.twoFactorCredential.deleteMany({ where: { userId: authUser.id } });
+    await prisma.$transaction([
+      prisma.twoFactorCredential.deleteMany({ where: { userId: authUser.id } }),
+      prisma.userSession.updateMany({
+        where: {
+          userId: authUser.id,
+          id: { not: response.locals.sessionId as string },
+          revokedAt: null,
+        },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
     response.json({ disabled: true });
   }),
 );
@@ -360,15 +658,82 @@ authRouter.post(
         where: { id: record.userId },
         data: { passwordHash: await bcrypt.hash(input.password, 12) },
       }),
+      prisma.userSession.updateMany({
+        where: { userId: record.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
     ]);
     response.json({ reset: true });
   }),
 );
 
-authRouter.post("/logout", (_request, response) => {
+authRouter.get(
+  "/sessions",
+  requireAuth,
+  asyncHandler(async (request, response) => {
+    const user = (request as AuthenticatedRequest).user!;
+    const sessions = await prisma.userSession.findMany({
+      where: {
+        userId: user.id,
+        revokedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      select: {
+        id: true,
+        device: true,
+        createdAt: true,
+        lastUsedAt: true,
+        expiresAt: true,
+      },
+      orderBy: { lastUsedAt: "desc" },
+    });
+    response.json({
+      sessions: sessions.map((session) => ({
+        ...session,
+        current: session.id === response.locals.sessionId,
+      })),
+    });
+  }),
+);
+
+authRouter.delete(
+  "/sessions/:sessionId",
+  requireAuth,
+  asyncHandler(async (request, response) => {
+    const user = (request as AuthenticatedRequest).user!;
+    const sessionId = z.string().uuid().parse(request.params.sessionId);
+    const revoked = await prisma.userSession.updateMany({
+      where: { id: sessionId, userId: user.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    if (revoked.count !== 1) {
+      response.status(404).json({ error: "Session not found" });
+      return;
+    }
+    if (sessionId === response.locals.sessionId) clearSessionCookie(response);
+    response.status(204).end();
+  }),
+);
+
+authRouter.post(
+  "/sessions/revoke-others",
+  requireAuth,
+  asyncHandler(async (request, response) => {
+    const user = (request as AuthenticatedRequest).user!;
+    const currentSessionId = response.locals.sessionId as string;
+    const result = await prisma.userSession.updateMany({
+      where: { userId: user.id, id: { not: currentSessionId }, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    response.json({ revoked: result.count });
+  }),
+);
+
+authRouter.post("/logout", asyncHandler(async (request, response) => {
+  await revokeSessionToken(request.cookies?.eventflow_session);
   clearSessionCookie(response);
   response.status(204).end();
-});
+}));
 
 authRouter.get(
   "/me",
@@ -383,6 +748,104 @@ authRouter.get(
       response.status(401).json({ error: "Account is no longer available" });
       return;
     }
-    response.json({ user });
+    response.json({
+      user: {
+        ...user,
+        mfaEnabled: (request as AuthenticatedRequest).user!.mfaEnabled,
+      },
+    });
+  }),
+);
+
+authRouter.get(
+  "/data-export",
+  requireAuth,
+  asyncHandler(async (request, response) => {
+    const userId = (request as AuthenticatedRequest).user!.id;
+    const account = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        emailVerifiedAt: true,
+        createdAt: true,
+        updatedAt: true,
+        organizationMemberships: {
+          select: {
+            role: true,
+            createdAt: true,
+            organization: { select: { id: true, name: true, slug: true } },
+          },
+        },
+        memberships: {
+          select: {
+            role: true,
+            createdAt: true,
+            event: {
+              select: {
+                id: true,
+                title: true,
+                type: true,
+                startDate: true,
+                endDate: true,
+                location: true,
+              },
+            },
+          },
+        },
+        consents: {
+          select: {
+            subjectType: true,
+            subjectId: true,
+            documentType: true,
+            version: true,
+            acceptedAt: true,
+          },
+          orderBy: { acceptedAt: "desc" },
+        },
+        sessions: {
+          select: {
+            device: true,
+            createdAt: true,
+            lastUsedAt: true,
+            expiresAt: true,
+            revokedAt: true,
+          },
+          orderBy: { createdAt: "desc" },
+        },
+        loginAttempts: {
+          select: {
+            email: true,
+            success: true,
+            reason: true,
+            userAgent: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: "desc" },
+          take: 500,
+        },
+        auditLogs: {
+          select: {
+            action: true,
+            entityType: true,
+            entityId: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: "desc" },
+          take: 500,
+        },
+      },
+    });
+    if (!account) {
+      response.status(404).json({ error: "Account is no longer available" });
+      return;
+    }
+    response.setHeader("Cache-Control", "no-store");
+    response.setHeader(
+      "Content-Disposition",
+      `attachment; filename="eventflow-account-data-${new Date().toISOString().slice(0, 10)}.json"`,
+    );
+    response.json({ exportedAt: new Date().toISOString(), account });
   }),
 );

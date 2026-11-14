@@ -1,16 +1,18 @@
 import { Router } from "express";
-import { EventType, OrderStatus, Prisma, UserRole } from "@prisma/client";
+import { EventType, OrderStatus, OrganizationRole, Prisma, UserRole, VendorStatus } from "@prisma/client";
 import { z } from "zod";
 import { config } from "../config.js";
 import { prisma } from "../db.js";
 import { asyncHandler } from "../lib/async-handler.js";
 import { inclusiveCalendarDays, parseDateOnly } from "../lib/duration.js";
 import { createOpaqueToken, hashOpaqueToken } from "../lib/tokens.js";
+import { canManageOrganizationEvents } from "../lib/authorization.js";
 import { moneySchema } from "../lib/money.js";
 import { phoneNumberSchema } from "../lib/contact.js";
 import { getRouteParam } from "../lib/route-param.js";
 import {
   requireAuth,
+  requireAdminMfa,
   requireEventAccess,
   requireEventStaffAccess,
   type AuthenticatedRequest,
@@ -22,6 +24,7 @@ import { createAssetUpload } from "../services/storage.js";
 const createEventSchema = z.object({
   title: z.string().trim().min(2).max(160),
   type: z.nativeEnum(EventType),
+  organizationId: z.string().min(1).max(100).optional(),
   startDate: z.string().refine(isValidDateOnly, "Date must be a valid YYYY-MM-DD date"),
   endDate: z.string().refine(isValidDateOnly, "Date must be a valid YYYY-MM-DD date"),
   location: z.string().trim().min(2).max(240),
@@ -47,6 +50,7 @@ const guestSchema = z.object({
   email: z.string().email().optional(),
   plusOnes: z.number().int().min(0).max(20).default(0),
   dietary: z.string().trim().max(500).optional(),
+  householdId: z.string().uuid().optional(),
 });
 
 const categorySchema = z.object({
@@ -71,6 +75,7 @@ const sessionSchema = z.object({
   description: z.string().trim().max(2000).optional(),
   location: z.string().trim().max(240).optional(),
   speaker: z.string().trim().max(160).optional(),
+  weddingDayId: z.string().uuid().optional().nullable(),
   startsAt: z.string().datetime(),
   endsAt: z.string().datetime(),
 }).refine((session) => new Date(session.endsAt) > new Date(session.startsAt), {
@@ -78,8 +83,20 @@ const sessionSchema = z.object({
   path: ["endsAt"],
 });
 
+const weddingChecklistTemplates = [
+  { key: "confirm-vision", title: "Agree on your wedding vision and priorities", category: "PLANNING", daysBefore: 365 },
+  { key: "set-budget", title: "Set your overall budget and spending priorities", category: "BUDGET", daysBefore: 300 },
+  { key: "book-venue", title: "Choose and book your venues", category: "VENUE", daysBefore: 240 },
+  { key: "book-key-vendors", title: "Book your key wedding vendors", category: "VENDORS", daysBefore: 180 },
+  { key: "send-invitations", title: "Send invitations and collect RSVPs", category: "GUESTS", daysBefore: 120 },
+  { key: "confirm-menu", title: "Confirm menu and dietary requirements", category: "GUESTS", daysBefore: 60 },
+  { key: "finalize-seating", title: "Finalize your seating plan", category: "GUESTS", daysBefore: 30 },
+  { key: "confirm-run-of-show", title: "Confirm the run of show with your team", category: "SCHEDULE", daysBefore: 14 },
+  { key: "final-vendor-check", title: "Reconfirm arrival times with vendors", category: "VENDORS", daysBefore: 7 },
+];
+
 export const eventsRouter = Router();
-eventsRouter.use(requireAuth);
+eventsRouter.use(requireAuth, requireAdminMfa);
 
 eventsRouter.get(
   "/",
@@ -88,10 +105,31 @@ eventsRouter.get(
     const events = await prisma.event.findMany({
       where: user.role === UserRole.ADMIN
         ? undefined
-        : { memberships: { some: { userId: user.id } } },
+        : {
+            OR: [
+              { memberships: { some: { userId: user.id } } },
+              {
+                organization: {
+                  memberships: {
+                    some: {
+                      userId: user.id,
+                      role: {
+                        in: [
+                          OrganizationRole.OWNER,
+                          OrganizationRole.ADMIN,
+                          OrganizationRole.EVENT_MANAGER,
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+            ],
+          },
       orderBy: { startDate: "asc" },
       select: {
         id: true,
+        organizationId: true,
         slug: true,
         title: true,
         type: true,
@@ -111,6 +149,82 @@ eventsRouter.post(
   "/",
   asyncHandler(async (request, response) => {
     const input = createEventSchema.parse(request.body);
+    const user = (request as AuthenticatedRequest).user!;
+    if (user.role === UserRole.CHECK_IN_STAFF) {
+      response.status(403).json({ error: "Check-in staff cannot create events" });
+      return;
+    }
+    let organizationId = input.organizationId;
+    if (user.role !== UserRole.ADMIN) {
+      const eligibleMemberships = await prisma.organizationMembership.findMany({
+        where: { userId: user.id },
+        select: { organizationId: true },
+      });
+      if (!organizationId && eligibleMemberships.length === 1) {
+        const onlyMembership = await prisma.organizationMembership.findUnique({
+          where: {
+            userId_organizationId: {
+              userId: user.id,
+              organizationId: eligibleMemberships[0]!.organizationId,
+            },
+          },
+          select: { role: true },
+        });
+        if (canManageOrganizationEvents(onlyMembership?.role)) {
+          organizationId = eligibleMemberships[0]!.organizationId;
+        }
+      }
+      if (!organizationId) {
+        response.status(400).json({
+          error: "Select an organization for this event",
+          code: eligibleMemberships.length > 1 ? "ORGANIZATION_REQUIRED" : "ORGANIZATION_ACCESS_REQUIRED",
+        });
+        return;
+      }
+      const membership = await prisma.organizationMembership.findUnique({
+        where: { userId_organizationId: { userId: user.id, organizationId } },
+        select: { role: true },
+      });
+      if (!canManageOrganizationEvents(membership?.role)) {
+        response.status(403).json({ error: "You cannot create events for this organization" });
+        return;
+      }
+    } else if (!organizationId) {
+      response.status(400).json({ error: "An organization is required for this event" });
+      return;
+    }
+
+    const organization = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { id: true },
+    });
+    if (!organization) {
+      response.status(404).json({ error: "Organization not found" });
+      return;
+    }
+    if (user.role !== UserRole.ADMIN) {
+      const now = new Date();
+      const subscription = await prisma.organizerSubscription.findFirst({
+        where: {
+          organizationId: organization.id,
+          status: { in: ["ACTIVE", "TRIALING"] },
+          currentPeriodStart: { lte: now },
+          currentPeriodEnd: { gt: now },
+        },
+        include: { plan: { select: { maxEvents: true } } },
+        orderBy: { currentPeriodEnd: "desc" },
+      });
+      if (subscription?.plan.maxEvents !== null && subscription?.plan.maxEvents !== undefined) {
+        const eventCount = await prisma.event.count({ where: { organizationId: organization.id } });
+        if (eventCount >= subscription.plan.maxEvents) {
+          response.status(402).json({
+            error: "Your current subscription has reached its event limit",
+            code: "SUBSCRIPTION_EVENT_LIMIT",
+          });
+          return;
+        }
+      }
+    }
     const durationDays = inclusiveCalendarDays(input.startDate, input.endDate);
     const startDate = parseDateOnly(input.startDate);
     const endDate = parseDateOnly(input.endDate);
@@ -126,9 +240,9 @@ eventsRouter.post(
       return;
     }
 
-    const user = (request as AuthenticatedRequest).user!;
     const event = await prisma.event.create({
       data: {
+        organizationId: organization.id,
         slug: `${input.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60)}-${createOpaqueToken().slice(0, 6)}`,
         title: input.title,
         type: input.type,
@@ -143,9 +257,22 @@ eventsRouter.post(
         currency: input.currency,
         location: input.location,
         description: input.description,
-        memberships: user.role === UserRole.ADMIN
-          ? undefined
-          : {
+        weddingProfile: input.type === EventType.WEDDING ? { create: {} } : undefined,
+        eventTasks: input.type === EventType.WEDDING
+          ? {
+              create: weddingChecklistTemplates.map((template) => {
+                const dueAt = new Date(startDate);
+                dueAt.setUTCDate(dueAt.getUTCDate() - template.daysBefore);
+                return {
+                  title: template.title,
+                  category: template.category,
+                  templateKey: template.key,
+                  dueAt: dueAt > new Date() ? dueAt : null,
+                };
+              }),
+            }
+          : undefined,
+        memberships: user.role === UserRole.ADMIN ? undefined : {
               create: {
                 userId: user.id,
                 role: UserRole.EVENT_MANAGER,
@@ -153,6 +280,8 @@ eventsRouter.post(
             },
       },
     });
+    response.locals.eventId = event.id;
+    response.locals.organizationId = event.organizationId;
     response.status(201).json({ event });
   }),
 );
@@ -397,7 +526,11 @@ eventsRouter.get(
         email: true,
         status: true,
         plusOnes: true,
+        plusOnesAllowed: true,
         dietary: true,
+        householdId: true,
+        invitationSentAt: true,
+        household: { select: { name: true } },
         checkedInAt: true,
         createdAt: true,
       },
@@ -460,11 +593,23 @@ eventsRouter.post(
       response.status(404).json({ error: "Wedding event not found" });
       return;
     }
+    if (input.householdId) {
+      const household = await prisma.guestHousehold.findFirst({
+        where: { id: input.householdId, eventId },
+        select: { id: true },
+      });
+      if (!household) {
+        response.status(400).json({ error: "Household must belong to this wedding" });
+        return;
+      }
+    }
     const token = createOpaqueToken();
+    const { householdId, ...guestInput } = input;
     const guest = await prisma.guest.create({
       data: {
         eventId,
-        ...input,
+        ...guestInput,
+        householdId,
         plusOnes: 0,
         plusOnesAllowed: input.plusOnes,
         rsvpTokenHash: hashOpaqueToken(token),
@@ -472,12 +617,27 @@ eventsRouter.post(
       select: { id: true, name: true, phone: true, status: true },
     });
     const rsvpUrl = `${config.WEB_ORIGIN}/rsvp/${token}`;
+    const profile = await prisma.weddingProfile.findUnique({
+      where: { eventId },
+      select: { invitationMessage: true },
+    });
+    const template = profile?.invitationMessage ??
+      "Hello {name}, you're invited to {event}. RSVP here: {rsvpUrl}";
+    const invitation = template
+      .replaceAll("{name}", input.name)
+      .replaceAll("{event}", event.title)
+      .replaceAll("{date}", event.startDate.toISOString().slice(0, 10))
+      .replaceAll("{location}", event.location)
+      .replaceAll("{rsvpUrl}", rsvpUrl);
     const sms = await sendEventSms(
       eventId,
       input.phone,
-      `Hello ${input.name}, you're invited to ${event.title}. RSVP here: ${rsvpUrl}`,
+      invitation.includes(rsvpUrl) ? invitation : `${invitation}\nRSVP: ${rsvpUrl}`,
     );
-    response.status(201).json({ guest, rsvpUrl, smsStatus: sms.status });
+    if (sms.status === "SENT") {
+      await prisma.guest.update({ where: { id: guest.id }, data: { invitationSentAt: new Date() } });
+    }
+    response.status(201).json({ guest: { ...guest, householdId, invitationSentAt: sms.status === "SENT" ? new Date() : null }, rsvpUrl, smsStatus: sms.status });
   }),
 );
 
@@ -538,10 +698,27 @@ eventsRouter.post(
   requireEventAccess,
   asyncHandler(async (request, response) => {
     const input = sessionSchema.parse(request.body);
+    if (input.weddingDayId) {
+      const eventId = getRouteParam(request, "eventId");
+      const event = await prisma.event.findUnique({ where: { id: eventId }, select: { type: true } });
+      const weddingDay = await prisma.weddingDay.findFirst({
+        where: { id: input.weddingDayId, eventId },
+        select: { date: true },
+      });
+      if (event?.type !== EventType.WEDDING || !weddingDay) {
+        response.status(400).json({ error: "Wedding day must belong to this wedding event" });
+        return;
+      }
+      if (new Date(input.startsAt).toISOString().slice(0, 10) !== weddingDay.date.toISOString().slice(0, 10)) {
+        response.status(400).json({ error: "Programme moment must start on its selected wedding day" });
+        return;
+      }
+    }
     const session = await prisma.eventSession.create({
       data: {
         eventId: getRouteParam(request, "eventId"),
         ...input,
+        weddingDayId: input.weddingDayId ?? null,
         startsAt: new Date(input.startsAt),
         endsAt: new Date(input.endsAt),
       },
@@ -578,14 +755,21 @@ eventsRouter.post(
       service: z.string().trim().min(1).max(160),
       phone: z.string().trim().max(30).optional(),
       email: z.string().email().optional(),
+      status: z.nativeEnum(VendorStatus).default(VendorStatus.SHORTLISTED),
+      quotedCost: moneySchema().optional(),
       agreedCost: moneySchema().optional(),
+      paidAmount: moneySchema().optional(),
+      paymentDueAt: z.string().datetime().optional(),
       notes: z.string().trim().max(2000).optional(),
     }).parse(request.body);
     const vendor = await prisma.vendor.create({
       data: {
         eventId: getRouteParam(request, "eventId"),
         ...input,
+        quotedCost: input.quotedCost === undefined ? undefined : new Prisma.Decimal(input.quotedCost),
         agreedCost: input.agreedCost === undefined ? undefined : new Prisma.Decimal(input.agreedCost),
+        paidAmount: input.paidAmount === undefined ? undefined : new Prisma.Decimal(input.paidAmount),
+        paymentDueAt: input.paymentDueAt ? new Date(input.paymentDueAt) : undefined,
       },
     });
     response.status(201).json({ vendor });
@@ -613,7 +797,19 @@ eventsRouter.post(
       estimatedCost: moneySchema(),
       actualCost: moneySchema().optional(),
       paid: z.boolean().default(false),
+      dueAt: z.string().datetime().optional(),
+      vendorId: z.string().uuid().optional(),
     }).parse(request.body);
+    if (input.vendorId) {
+      const vendor = await prisma.vendor.findFirst({
+        where: { id: input.vendorId, eventId: getRouteParam(request, "eventId") },
+        select: { id: true },
+      });
+      if (!vendor) {
+        response.status(400).json({ error: "Budget vendor must belong to this event" });
+        return;
+      }
+    }
     const item = await prisma.budgetItem.create({
       data: {
         eventId: getRouteParam(request, "eventId"),
@@ -621,6 +817,8 @@ eventsRouter.post(
         estimatedCost: new Prisma.Decimal(input.estimatedCost),
         actualCost: input.actualCost === undefined ? undefined : new Prisma.Decimal(input.actualCost),
         paid: input.paid,
+        dueAt: input.dueAt ? new Date(input.dueAt) : undefined,
+        vendorId: input.vendorId,
       },
     });
     response.status(201).json({ item });
@@ -714,15 +912,19 @@ eventsRouter.post(
   asyncHandler(async (request, response) => {
     const input = z.object({
       title: z.string().trim().min(1).max(160),
+      category: z.string().trim().max(80).optional(),
       url: z.string().url().optional(),
       price: moneySchema().optional(),
+      quantity: z.number().int().min(1).max(1000).default(1),
     }).parse(request.body);
     const item = await prisma.registryItem.create({
       data: {
         eventId: getRouteParam(request, "eventId"),
         title: input.title,
+        category: input.category,
         url: input.url,
         price: input.price === undefined ? undefined : new Prisma.Decimal(input.price),
+        quantity: input.quantity,
       },
     });
     response.status(201).json({ item });
